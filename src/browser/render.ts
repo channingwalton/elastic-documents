@@ -8,27 +8,36 @@ import { toggle, view, type OpenSet, type ViewBlock, type ViewInline } from '../
  */
 export function mount(container: HTMLElement, elastic: ElasticDocument): void {
   let open: OpenSet = new Set()
+  // Once a click toggles, the rest of that double- or triple-click lands on whatever the
+  // redraw put under the pointer, so it neither toggles nor selects a word.
+  let clickToggled = false
 
   const draw = (): void => {
     container.replaceChildren(element('h1', elastic.title), ...view(elastic, open).map(paragraph))
   }
 
-  const toggleAt = (target: EventTarget | null): boolean => {
+  const toggleAt = (target: EventTarget | null, byClick: boolean): boolean => {
     const id = controlAt(target)?.dataset.toggle
     if (id === undefined) return false
+    const opening = !open.has(id)
     open = toggle(open, id)
     draw()
-    findStretch(container, id)?.focus()
+    // Opening by click keeps the text still under the pointer; otherwise bring the phrase into view.
+    findStretch(container, id)?.focus({ preventScroll: byClick && opening })
     return true
   }
 
+  container.addEventListener('mousedown', (event) => {
+    if (event.detail > 1 && clickToggled) event.preventDefault()
+  })
   container.addEventListener('click', (event) => {
-    if (!endsSelectionAcross(event.target)) toggleAt(event.target)
+    if (event.detail > 1 && clickToggled) return
+    clickToggled = !endsSelectionAcross(event.target) && toggleAt(event.target, true)
   })
   container.addEventListener('keydown', (event) => {
     if (event.key !== 'Enter' && event.key !== ' ') return
     if (event.shiftKey || event.ctrlKey || event.metaKey || event.altKey) return
-    if (event.repeat ? isControl(event.target) : toggleAt(event.target)) event.preventDefault()
+    if (event.repeat ? isControl(event.target) : toggleAt(event.target, false)) event.preventDefault()
   })
   draw()
 }

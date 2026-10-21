@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { documentFrom } from '../core/testing'
 import { mount, showErrors } from './render'
 
@@ -34,6 +34,11 @@ function control(container: HTMLElement, id: string): HTMLElement {
 
 function firstParagraph(container: HTMLElement): string {
   return container.querySelector('p')?.textContent ?? ''
+}
+
+/** `detail` is the click count: 2 for the second click of a double-click. */
+function click(target: HTMLElement, detail: number): void {
+  target.dispatchEvent(new MouseEvent('click', { bubbles: true, detail }))
 }
 
 function press(target: HTMLElement, key: string, init: KeyboardEventInit = {}): KeyboardEvent {
@@ -137,6 +142,87 @@ describe('mount', () => {
 
     expect(firstParagraph(container)).toBe('A document the reader stretches and shrinks.')
     getSelection()?.removeAllRanges()
+  })
+
+  describe('a double- or triple-click', () => {
+    /** The long form starts with a nested stretch, so a second click lands on it. */
+    function mountStartingWithStretch(): HTMLElement {
+      const container = document.createElement('div')
+      mount(
+        container,
+        documentFrom({
+          title: 'T',
+          blocks: [
+            [{ id: 'outer', short: 'word', elaborate: [{ id: 'inner', short: 'word', elaborate: ['word inside'] }, ' after'] }],
+          ],
+        }),
+      )
+      return container
+    }
+
+    function mousedown(target: HTMLElement, detail: number): MouseEvent {
+      const event = new MouseEvent('mousedown', { bubbles: true, cancelable: true, detail })
+      target.dispatchEvent(event)
+      return event
+    }
+
+    it('opens a stretch once, ignoring the clicks that land on what the first click revealed', () => {
+      const container = mountStartingWithStretch()
+      click(control(container, 'outer'), 1)
+      click(control(container, 'inner'), 2)
+      expect(firstParagraph(container)).toBe('word after')
+
+      click(control(container, 'inner'), 3)
+      expect(firstParagraph(container)).toBe('word after')
+    })
+
+    it('collapses a stretch once, ignoring the click that lands on what the collapse moved under the pointer', () => {
+      const container = mountStartingWithStretch()
+      control(container, 'outer').click()
+      click(control(container, 'outer'), 1)
+      click(control(container, 'outer'), 2)
+
+      expect(firstParagraph(container)).toBe('word')
+    })
+
+    it('acts on a second click when the first click toggled nothing', () => {
+      const container = mountStartingWithStretch()
+      click(container.querySelector('h1') as HTMLElement, 1)
+      click(control(container, 'outer'), 2)
+
+      expect(firstParagraph(container)).toBe('word after')
+    })
+
+    it('stops the second press selecting a word only when the first click toggled', () => {
+      const container = mountStartingWithStretch()
+      click(control(container, 'outer'), 1)
+      expect(mousedown(stretch(container, 'outer'), 2).defaultPrevented).toBe(true)
+
+      const heading = container.querySelector('h1') as HTMLElement
+      click(heading, 1)
+      expect(mousedown(heading, 2).defaultPrevented).toBe(false)
+    })
+  })
+
+  it('keeps the page still when a click opens a stretch, and brings the phrase into view otherwise', () => {
+    const focus = vi.spyOn(HTMLElement.prototype, 'focus')
+    const lastFocus = () => ({ element: focus.mock.contexts.at(-1), options: focus.mock.lastCall?.[0] })
+
+    try {
+      control(container, 'outer').click()
+      expect(lastFocus()).toEqual({ element: stretch(container, 'outer'), options: { preventScroll: true } })
+
+      control(container, 'outer').click()
+      expect(lastFocus()).toEqual({ element: control(container, 'outer'), options: { preventScroll: false } })
+
+      press(control(container, 'outer'), 'Enter')
+      expect(lastFocus()).toEqual({ element: stretch(container, 'outer'), options: { preventScroll: false } })
+
+      press(control(container, 'outer'), 'Enter')
+      expect(lastFocus()).toEqual({ element: control(container, 'outer'), options: { preventScroll: false } })
+    } finally {
+      focus.mockRestore()
+    }
   })
 
   it('alternates the shade of open stretches at every depth', () => {
