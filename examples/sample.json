@@ -1,0 +1,66 @@
+{
+  "title": "Elastic Documents",
+  "blocks": [
+    [
+      "An elastic document is ",
+      {
+        "id": "stretch",
+        "short": "one the reader stretches and shrinks in place",
+        "elaborate": [
+          "one the reader stretches and shrinks in place. A summary opens into ",
+          {
+            "id": "opens-into",
+            "short": "its detail",
+            "elaborate": ["its detail, its sources, an example or its objections"]
+          },
+          ", and closes back again, while the reader stays oriented throughout"
+        ]
+      },
+      "."
+    ],
+    [
+      "The idea is ",
+      {
+        "id": "nelson",
+        "short": "Ted Nelson's stretchtext",
+        "elaborate": [
+          "Ted Nelson's stretchtext, from his Hypertext Note 8 of 1967, renamed so the wider business can see what it means"
+        ]
+      },
+      "."
+    ],
+    [
+      {
+        "id": "why-now",
+        "short": "It never spread",
+        "elaborate": [
+          "It never spread, because an author had to write every level by hand. ",
+          {
+            "id": "llm",
+            "short": "An LLM can now produce the levels",
+            "elaborate": [
+              "An LLM can now produce the levels, though it shortens text well and expands it poorly, and expansion invites invention"
+            ]
+          }
+        ]
+      },
+      "."
+    ],
+    [
+      "Elastic documents are ",
+      {
+        "id": "not-software",
+        "short": "not specific to software",
+        "elaborate": [
+          "not specific to software: a bid, a contract, a policy or a board paper serves readers who need different depths. ",
+          {
+            "id": "director",
+            "short": "A director wants the conclusion",
+            "elaborate": ["A director wants the conclusion; a reviewer needs the clause behind it"]
+          }
+        ]
+      },
+      "."
+    ]
+  ]
+}

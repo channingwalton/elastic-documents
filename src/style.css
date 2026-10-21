@@ -1,0 +1,86 @@
+:root {
+  --text: #1f2328;
+  --background: #fdfcf9;
+  --stretch-line: #8a8f98;
+  --open-1: #eef3fb;
+  --open-2: #dfe9f7;
+  --focus: #2f6fdb;
+  --control: #5b6270;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --text: #e6e6e3;
+    --background: #1b1c1e;
+    --stretch-line: #8d939c;
+    --open-1: #24303f;
+    --open-2: #2e3d52;
+    --focus: #79a6f2;
+    --control: #aab3c0;
+    color-scheme: dark;
+  }
+}
+
+body {
+  margin: 0;
+  background: var(--background);
+  color: var(--text);
+  font: 18px/1.65 Georgia, 'Times New Roman', serif;
+}
+
+main {
+  max-width: 40rem;
+  margin: 0 auto;
+  padding: 2rem 1rem 4rem;
+}
+
+h1 {
+  font-size: 1.8rem;
+  line-height: 1.25;
+}
+
+.stretch {
+  cursor: pointer;
+  border-bottom: 1px dotted var(--stretch-line);
+}
+
+.stretch.open {
+  cursor: auto;
+  border-bottom: none;
+  border-radius: 3px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+/* The renderer alternates shades by depth, so each open stretch stands out from the one around it. */
+.stretch.shade-1 {
+  background: var(--open-1);
+}
+
+.stretch.shade-2 {
+  background: var(--open-2);
+}
+
+.collapse {
+  cursor: pointer;
+  margin-left: 0.25em;
+  border-radius: 1em;
+}
+
+.collapse::after {
+  content: '\2212';
+  display: inline-block;
+  padding: 0.1em 0.4em;
+  border: 1px solid var(--control);
+  border-radius: 1em;
+  color: var(--control);
+  font: 0.7em/1 system-ui, sans-serif;
+  vertical-align: 0.2em;
+}
+
+.stretch:focus-visible,
+.collapse:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
