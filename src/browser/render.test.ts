@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Operation } from '../core/document'
 import { documentFrom } from '../core/testing'
-import { mount, showErrors } from './render'
+import { elementId, mount, showErrors } from './render'
 
 const nested = documentFrom({
   title: 'T',
@@ -19,17 +20,35 @@ const nested = documentFrom({
   ],
 })
 
+function byId(container: HTMLElement, id: string): HTMLElement | null {
+  return container.querySelector<HTMLElement>(`#${CSS.escape(id)}`)
+}
+
+/** A phrase, or its elaborated text when it is open. */
 function stretch(container: HTMLElement, id: string): HTMLElement {
-  const element = container.querySelector<HTMLElement>(`[data-stretch="${id}"]`)
+  const element = byId(container, elementId.phrase(id)) ?? byId(container, elementId.revealed(id, 'elaborate'))
   if (!element) throw new Error(`no stretch ${id}`)
   return element
 }
 
-/** The control that opens a closed stretch or collapses an open one. */
+/** The control that opens a closed phrase, or collapses an elaborated one. */
 function control(container: HTMLElement, id: string): HTMLElement {
-  const element = container.querySelector<HTMLElement>(`[data-toggle="${id}"]`)
+  const element =
+    container.querySelector<HTMLElement>(`[data-activate="${id}"]`) ??
+    container.querySelector<HTMLElement>(`[data-toggle="${id}"][data-operation="elaborate"]`)
   if (!element) throw new Error(`no control for ${id}`)
   return element
+}
+
+/** The button for one operation on a phrase, in the row beside it. */
+function chip(container: HTMLElement, id: string, operation: string): HTMLElement {
+  const element = container.querySelector<HTMLElement>(`.chips [data-toggle="${id}"][data-operation="${operation}"]`)
+  if (!element) throw new Error(`no ${operation} chip for ${id}`)
+  return element
+}
+
+function attachment(container: HTMLElement, id: string, operation: Operation): HTMLElement | null {
+  return byId(container, elementId.revealed(id, operation))
 }
 
 function firstParagraph(container: HTMLElement): string {
@@ -278,6 +297,10 @@ describe('mount', () => {
       'Collapse: and shrinks',
       'Collapse: the reader stretches',
     ])
+    expect([...container.querySelectorAll<HTMLElement>('.collapse')].map((c) => c.title)).toEqual([
+      'Collapse: and shrinks',
+      'Collapse: the reader stretches',
+    ])
   })
 
   it('ignores keys with modifiers', () => {
@@ -305,6 +328,217 @@ describe('mount', () => {
 
     press(control(container, 'outer'), 'Enter')
     expect(document.activeElement).toBe(control(container, 'outer'))
+  })
+})
+
+describe('mount with several operations', () => {
+  const rich = documentFrom({
+    title: 'T',
+    blocks: [
+      [
+        'The idea is ',
+        {
+          id: 'idea',
+          short: 'stretchtext',
+          elaborate: ['stretchtext, from 1967'],
+          ground: [
+            { note: 'Stretchtext', date: '2026-10-19', quote: 'the reader remains oriented' },
+            { note: 'Elastic Documents', quote: 'A summary opens into its detail.' },
+          ],
+          challenge: ['An objection.'],
+          exemplify: [['An example with ', { id: 'deep', short: 'a source', ground: [{ note: 'N', quote: 'Q' }] }, '.']],
+        },
+        '.',
+      ],
+      ['A second paragraph.'],
+    ],
+  })
+
+  let container: HTMLElement
+
+  beforeEach(() => {
+    container = document.createElement('div')
+    document.body.replaceChildren(container)
+    mount(container, rich)
+  })
+
+  function chipLabels(): (string | null)[][] {
+    return [...container.querySelectorAll('.chips [data-operation]')].map((c) => [
+      c.getAttribute('aria-label'),
+      c.getAttribute('aria-pressed'),
+    ])
+  }
+
+  it('shows a button for each operation the phrase has, with counts, keeping them out of the text', () => {
+    control(container, 'idea').click()
+
+    expect(chipLabels()).toEqual([
+      ['Elaborate', 'false'],
+      ['Ground, 2', 'false'],
+      ['Exemplify, 1', 'false'],
+      ['Challenge, 1', 'false'],
+    ])
+    expect([...container.querySelectorAll<HTMLElement>('.chips .chip')].map((c) => c.title)).toEqual([
+      'Add detail',
+      'Reveal the sources',
+      'Make it concrete',
+      'Show objections and limits',
+    ])
+    expect(chip(container, 'idea', 'ground').dataset.label).toBe('Ground ·2')
+    expect(control(container, 'idea').getAttribute('aria-expanded')).toBe('true')
+    expect(firstParagraph(container)).toBe('The idea is stretchtext.')
+  })
+
+  it('moves keyboard focus to the first button, and toggles a button with Enter', () => {
+    press(control(container, 'idea'), 'Enter')
+    expect(document.activeElement).toBe(chip(container, 'idea', 'elaborate'))
+
+    press(chip(container, 'idea', 'ground'), 'Enter')
+    expect(attachment(container, 'idea', 'ground')).not.toBeNull()
+  })
+
+  it('opens Ground beneath the paragraph as quoted passages with their note and date', () => {
+    control(container, 'idea').click()
+    chip(container, 'idea', 'ground').click()
+
+    const ground = attachment(container, 'idea', 'ground')
+    expect(ground?.previousElementSibling?.tagName).toBe('P')
+    expect(ground?.getAttribute('aria-label')).toBe('Ground: stretchtext')
+    expect([...(ground?.querySelectorAll('blockquote') ?? [])].map((q) => q.textContent)).toEqual([
+      'the reader remains orientedStretchtext · 2026-10-19',
+      'A summary opens into its detail.Elastic Documents',
+    ])
+    expect(chip(container, 'idea', 'ground').getAttribute('aria-pressed')).toBe('true')
+    expect(document.activeElement).toBe(ground)
+  })
+
+  it('closes an operation from its close control and returns focus to its button', () => {
+    control(container, 'idea').click()
+    chip(container, 'idea', 'ground').click()
+    attachment(container, 'idea', 'ground')?.querySelector<HTMLElement>('.close')?.click()
+
+    expect(attachment(container, 'idea', 'ground')).toBeNull()
+    expect(document.activeElement).toBe(chip(container, 'idea', 'ground'))
+  })
+
+  it('opens a list operation as paragraphs whose phrases open in turn, beneath their own paragraph', () => {
+    control(container, 'idea').click()
+    chip(container, 'idea', 'exemplify').click()
+    control(container, 'deep').click()
+
+    const exemplify = attachment(container, 'idea', 'exemplify')
+    expect(exemplify?.querySelector('p')?.textContent).toBe('An example with a source.')
+    expect(attachment(container, 'deep', 'ground')?.parentElement).toBe(exemplify)
+    expect(attachment(container, 'deep', 'ground')?.previousElementSibling?.tagName).toBe('P')
+  })
+
+  it('elaborates from its button, which stays a pressed button beside the others and collapses it again', () => {
+    control(container, 'idea').click()
+    chip(container, 'idea', 'elaborate').click()
+
+    expect(firstParagraph(container)).toBe('The idea is stretchtext, from 1967.')
+    expect(stretch(container, 'idea').querySelector('.chips')).not.toBeNull()
+    expect(chipLabels()).toEqual([
+      ['Elaborate', 'true'],
+      ['Ground, 2', 'false'],
+      ['Exemplify, 1', 'false'],
+      ['Challenge, 1', 'false'],
+    ])
+
+    chip(container, 'idea', 'elaborate').click()
+    expect(firstParagraph(container)).toBe('The idea is stretchtext.')
+  })
+
+  /** The elements an aria-controls attribute names, each looked up by its id; fails if one is missing. */
+  function controlled(element: Element): Element[] {
+    return (element.getAttribute('aria-controls') ?? '')
+      .split(' ')
+      .filter(Boolean)
+      .map((id) => {
+        const found = document.getElementById(id)
+        if (!found) throw new Error(`aria-controls names a missing element: ${id}`)
+        return found
+      })
+  }
+
+  it('links the phrase to its buttons and what it opened, and a pressed button to its content', () => {
+    control(container, 'idea').click()
+    expect(controlled(control(container, 'idea'))).toEqual([container.querySelector('.chips')])
+    expect(chip(container, 'idea', 'ground').hasAttribute('aria-controls')).toBe(false)
+
+    chip(container, 'idea', 'ground').click()
+    const ground = attachment(container, 'idea', 'ground')
+    expect(controlled(chip(container, 'idea', 'ground'))).toEqual([ground])
+    expect(controlled(control(container, 'idea'))).toEqual([container.querySelector('.chips'), ground])
+  })
+
+  it('does not link a control to the element it sits inside', () => {
+    control(container, 'idea').click()
+    chip(container, 'idea', 'elaborate').click()
+    chip(container, 'idea', 'ground').click()
+    expect(chip(container, 'idea', 'elaborate').hasAttribute('aria-controls')).toBe(false)
+    expect(attachment(container, 'idea', 'ground')?.querySelector('.close')?.hasAttribute('aria-controls')).toBe(false)
+
+    const single = document.createElement('div')
+    document.body.replaceChildren(single)
+    mount(single, nested)
+    control(single, 'outer').click()
+    const collapse = single.querySelector('.collapse')
+    expect(collapse?.getAttribute('aria-label')).toBe('Collapse: the reader stretches')
+    expect(collapse?.hasAttribute('aria-controls')).toBe(false)
+  })
+
+  it('gives every element a unique id, including inside content opened beneath', () => {
+    control(container, 'idea').click()
+    chip(container, 'idea', 'exemplify').click()
+    chip(container, 'idea', 'ground').click()
+    chip(container, 'idea', 'elaborate').click()
+    control(container, 'deep').click()
+
+    const ids = [...container.querySelectorAll('[id]')].map((el) => el.id)
+    expect(ids).toContain(elementId.revealed('idea', 'elaborate'))
+    expect(new Set(ids).size).toBe(ids.length)
+    expect(controlled(control(container, 'deep'))).toEqual([
+      attachment(container, 'idea', 'exemplify')?.querySelector('.chips'),
+      attachment(container, 'deep', 'ground'),
+    ])
+  })
+
+  it('returns keyboard focus to the Elaborate button, now unpressed, when it collapses the phrase', () => {
+    control(container, 'idea').click()
+    press(chip(container, 'idea', 'elaborate'), 'Enter')
+    press(chip(container, 'idea', 'elaborate'), 'Enter')
+
+    expect(document.activeElement).toBe(chip(container, 'idea', 'elaborate'))
+    expect(chip(container, 'idea', 'elaborate').getAttribute('aria-pressed')).toBe('false')
+  })
+
+  it('shows a lone operation other than Elaborate as a pressed button, not a collapse control', () => {
+    control(container, 'idea').click()
+    chip(container, 'idea', 'exemplify').click()
+    control(container, 'deep').click()
+
+    const row = attachment(container, 'idea', 'exemplify')?.querySelector('.chips')
+    expect(row?.querySelector('.collapse')).toBeNull()
+    expect(chip(container, 'deep', 'ground').getAttribute('aria-pressed')).toBe('true')
+  })
+
+  it('gives the close control a tooltip that matches its name', () => {
+    control(container, 'idea').click()
+    chip(container, 'idea', 'ground').click()
+    const close = attachment(container, 'idea', 'ground')?.querySelector<HTMLElement>('.close')
+
+    expect(close?.getAttribute('aria-label')).toBe('Close Ground: stretchtext')
+    expect(close?.title).toBe('Close Ground: stretchtext')
+  })
+
+  it('closes everything on a phrase when the phrase is clicked with something open', () => {
+    control(container, 'idea').click()
+    chip(container, 'idea', 'challenge').click()
+    control(container, 'idea').click()
+
+    expect(attachment(container, 'idea', 'challenge')).toBeNull()
+    expect(container.querySelector('.chips')).toBeNull()
   })
 })
 

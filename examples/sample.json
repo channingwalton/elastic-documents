@@ -14,7 +14,8 @@
             "elaborate": ["its detail, its sources, an example or its objections"]
           },
           ", and closes back again, while the reader stays oriented throughout"
-        ]
+        ],
+        "reframe": ["Like zooming into a map: the same territory, with more detail the closer you look."]
       },
       "."
     ],
@@ -25,6 +26,16 @@
         "short": "Ted Nelson's stretchtext",
         "elaborate": [
           "Ted Nelson's stretchtext, from his Hypertext Note 8 of 1967, renamed so the wider business can see what it means"
+        ],
+        "ground": [
+          {
+            "note": "Stretchtext",
+            "quote": "In 1967 Ted Nelson described stretchtext: text that \"stretches, becoming longer, with replacement phrases, new details and additional clauses popping into place\", and shrinks back on demand, while \"the reader remains oriented\" (Hypertext Note 8)."
+          },
+          {
+            "note": "Stretchtext",
+            "quote": "In 1970 he put it like this: \"Gaps appear between phrases; new words and phrases pop into the gaps, an item at a time.\""
+          }
         ]
       },
       "."
@@ -42,6 +53,21 @@
               "An LLM can now produce the levels, though it shortens text well and expands it poorly, and expansion invites invention"
             ]
           }
+        ],
+        "ground": [
+          {
+            "note": "Elastic Documents",
+            "date": "2026-10-19",
+            "quote": "Elastic documents never spread because an author had to write every level by hand. An LLM can now produce the levels. The open question is fidelity: whether the reader can always tell what the author said from what the AI added."
+          }
+        ],
+        "derive": [
+          "An author had to write every level of detail by hand.",
+          "Writing every level costs more than most documents can bear.",
+          "So stretchtext stayed a demonstration rather than a way of writing."
+        ],
+        "challenge": [
+          "LLMs shorten text well and expand it poorly, and expansion invites invention (Jensenius 2025)."
         ]
       },
       "."
@@ -57,6 +83,38 @@
             "id": "director",
             "short": "A director wants the conclusion",
             "elaborate": ["A director wants the conclusion; a reviewer needs the clause behind it"]
+          }
+        ],
+        "exemplify": [
+          [
+            "A discovery report in which each finding opens into the evidence behind it: \"three teams report the same approval bottleneck\" opens into ",
+            {
+              "id": "excerpts",
+              "short": "the three interview excerpts",
+              "ground": [
+                {
+                  "note": "Elastic Documents - an idea worth a look",
+                  "date": "2026-10-19",
+                  "quote": "For example, \"three teams report the same approval bottleneck\" opens into the three excerpts, their dates and how they differ. A client could then trust the analysis, and argue with it, without rereading every transcript."
+                }
+              ]
+            },
+            "."
+          ]
+        ]
+      },
+      "."
+    ],
+    [
+      "The lab treats its design principles as ",
+      {
+        "id": "premises",
+        "short": "premises to test",
+        "ground": [
+          {
+            "note": "Elastic Documents",
+            "date": "2026-10-19",
+            "quote": "Open, under AI-generated elastic documents. It treats the operations and design principles above as premises to test, not settled findings."
           }
         ]
       },

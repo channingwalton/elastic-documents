@@ -3,12 +3,47 @@ export interface Text {
   readonly text: string
 }
 
-/** A phrase the reader can open. Its long form replaces the short form in place. */
+/** The operations whose content is a list of blocks. */
+const listOperations = ['derive', 'exemplify', 'challenge', 'reframe'] as const
+
+export type ListOperation = (typeof listOperations)[number]
+
+/** The ways a reader can open a phrase. Elaborate replaces it in place; the others open beneath it. */
+export const operations = ['elaborate', 'ground', ...listOperations] as const
+
+export type Operation = (typeof operations)[number]
+
+/** How each operation is named to the reader, and what it reveals. */
+export const operationInfo: Readonly<Record<Operation, { readonly label: string; readonly purpose: string }>> = {
+  elaborate: { label: 'Elaborate', purpose: 'Add detail' },
+  ground: { label: 'Ground', purpose: 'Reveal the sources' },
+  derive: { label: 'Derive', purpose: 'Show the intermediate steps' },
+  exemplify: { label: 'Exemplify', purpose: 'Make it concrete' },
+  challenge: { label: 'Challenge', purpose: 'Show objections and limits' },
+  reframe: { label: 'Reframe', purpose: 'Put it another way' },
+}
+
+export const isOperation = (value: unknown): value is Operation =>
+  typeof value === 'string' && (operations as readonly string[]).includes(value)
+
+/** A passage quoted from a vault note. */
+export interface Passage {
+  readonly note: string
+  readonly date?: string
+  readonly quote: string
+}
+
+/** A phrase the reader can open, by any operation it has content for. */
 export interface Stretch {
   readonly kind: 'stretch'
   readonly id: string
   readonly short: string
-  readonly elaborate: readonly Inline[]
+  readonly elaborate?: readonly Inline[]
+  readonly ground?: readonly Passage[]
+  readonly derive?: readonly Block[]
+  readonly exemplify?: readonly Block[]
+  readonly challenge?: readonly Block[]
+  readonly reframe?: readonly Block[]
 }
 
 export type Inline = Text | Stretch
@@ -42,7 +77,9 @@ const isVisible = (inline: Inline): boolean => inline.kind === 'stretch' || inli
 
 /**
  * Reads a hand-written document. In the JSON form a string is text and an
- * object `{ id, short, elaborate }` is a stretch; `elaborate` nests the same way.
+ * object `{ id, short, ...operations }` is a stretch. `elaborate` holds inlines,
+ * `ground` holds passages, and each list operation holds blocks, where a string
+ * stands for a block of plain text.
  */
 export function parseDocument(json: unknown): ParseResult {
   if (!isObject(json)) return { ok: false, errors: ['document: expected an object'] }
@@ -84,6 +121,8 @@ function parseInline(value: unknown, path: string, context: Context): Inline[] {
   return [parseStretch(value, path, context)]
 }
 
+const stretchFields: ReadonlySet<string> = new Set(['id', 'short', ...operations])
+
 function parseStretch(value: JsonObject, path: string, context: Context): Stretch {
   const { id, short } = value
 
@@ -94,10 +133,91 @@ function parseStretch(value: JsonObject, path: string, context: Context): Stretc
 
   if (!hasText(short)) context.errors.push(`${path}.short: expected a non-empty string`)
 
-  return {
-    kind: 'stretch',
-    id: hasText(id) ? id : '',
-    short: hasText(short) ? short : '',
-    elaborate: parseInlines(value.elaborate, `${path}.elaborate`, context),
+  for (const key of Object.keys(value)) {
+    if (!stretchFields.has(key)) context.errors.push(`${path}.${key}: unknown field`)
   }
+  if (!operations.some((operation) => value[operation] !== undefined)) {
+    context.errors.push(`${path}: expected at least one operation`)
+  }
+
+  // Parsed in the fixed order of the operations, so errors come out in that order.
+  const content: { -readonly [K in Operation]?: NonNullable<Stretch[K]> } = {}
+  for (const operation of operations) {
+    const raw = value[operation]
+    if (raw === undefined) continue
+    const where = `${path}.${operation}`
+    if (operation === 'elaborate') content.elaborate = parseInlines(raw, where, context)
+    else if (operation === 'ground') content.ground = parsePassages(raw, where, context)
+    else content[operation] = parseList(raw, where, context)
+  }
+
+  return { kind: 'stretch', id: hasText(id) ? id : '', short: hasText(short) ? short : '', ...content }
+}
+
+function parseItems<T>(value: unknown, path: string, context: Context, parse: (item: unknown, path: string) => T[]): T[] {
+  if (!Array.isArray(value)) {
+    context.errors.push(`${path}: expected an array`)
+    return []
+  }
+  if (value.length === 0) context.errors.push(`${path}: expected at least one item`)
+  return value.flatMap((item, i) => parse(item, `${path}[${i}]`))
+}
+
+const passageFields: ReadonlySet<string> = new Set(['note', 'quote', 'date'])
+
+function parsePassages(value: unknown, path: string, context: Context): Passage[] {
+  return parseItems(value, path, context, (item, itemPath) => {
+    if (!isObject(item)) {
+      context.errors.push(`${itemPath}: expected a passage object`)
+      return []
+    }
+    const { note, quote, date } = item
+    for (const key of Object.keys(item)) {
+      if (!passageFields.has(key)) context.errors.push(`${itemPath}.${key}: unknown field`)
+    }
+    if (!hasText(note)) context.errors.push(`${itemPath}.note: expected a non-empty string`)
+    if (!hasText(quote)) context.errors.push(`${itemPath}.quote: expected a non-empty string`)
+    if (date !== undefined && !hasText(date)) context.errors.push(`${itemPath}.date: expected a non-empty string`)
+    return [
+      {
+        note: hasText(note) ? note : '',
+        quote: hasText(quote) ? quote : '',
+        ...(hasText(date) ? { date } : {}),
+      },
+    ]
+  })
+}
+
+function parseList(value: unknown, path: string, context: Context): Block[] {
+  return parseItems(value, path, context, (item, itemPath) => {
+    if (typeof item === 'string') return [{ inlines: parseInlines([item], itemPath, context) }]
+    if (Array.isArray(item)) return [{ inlines: parseInlines(item, itemPath, context) }]
+    context.errors.push(`${itemPath}: expected a string or an array of inlines`)
+    return []
+  })
+}
+
+/** The operations a stretch has content for, in their fixed order. */
+export function available(stretch: Stretch): Operation[] {
+  return operations.filter((operation) => stretch[operation] !== undefined)
+}
+
+/** How many items an operation holds. Elaborate is a single long form, so it has no count. */
+export function count(stretch: Stretch, operation: Operation): number | undefined {
+  return operation === 'elaborate' ? undefined : stretch[operation]?.length
+}
+
+/** Every stretch in the document, wherever it is nested, by id. */
+export function stretchesById(document: ElasticDocument): ReadonlyMap<string, Stretch> {
+  const found = new Map<string, Stretch>()
+  const visit = (inlines: readonly Inline[]): void => {
+    for (const inline of inlines) {
+      if (inline.kind === 'text') continue
+      found.set(inline.id, inline)
+      visit(inline.elaborate ?? [])
+      for (const operation of listOperations) for (const block of inline[operation] ?? []) visit(block.inlines)
+    }
+  }
+  for (const block of document.blocks) visit(block.inlines)
+  return found
 }

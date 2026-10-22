@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseDocument } from './document'
+import { available, count, parseDocument, type Stretch } from './document'
 
 describe('parseDocument', () => {
   it('reads strings as text and objects as stretches, at any depth', () => {
@@ -130,5 +130,151 @@ describe('parseDocument', () => {
       ok: false,
       errors: ['blocks[0][0].id: expected a non-empty string'],
     })
+  })
+})
+
+describe('parseDocument operations', () => {
+  function stretchFrom(json: Record<string, unknown>) {
+    return parseDocument({ title: 'T', blocks: [[{ id: 'a', short: 'a', ...json }]] })
+  }
+
+  it('reads Ground passages, with or without a date', () => {
+    expect(
+      stretchFrom({
+        ground: [
+          { note: 'Stretchtext', date: '2026-10-19', quote: 'the reader remains oriented' },
+          { note: 'Elastic Documents', quote: 'A summary opens into its detail.' },
+        ],
+      }),
+    ).toEqual({
+      ok: true,
+      document: {
+        title: 'T',
+        blocks: [
+          {
+            inlines: [
+              {
+                kind: 'stretch',
+                id: 'a',
+                short: 'a',
+                ground: [
+                  { note: 'Stretchtext', date: '2026-10-19', quote: 'the reader remains oriented' },
+                  { note: 'Elastic Documents', quote: 'A summary opens into its detail.' },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    })
+  })
+
+  it('reads the list operations as blocks, where a string stands for a block of plain text', () => {
+    const parsed = stretchFrom({
+      derive: ['First step.'],
+      exemplify: [['An example with ', { id: 'b', short: 'a stretch', elaborate: ['a stretch inside'] }]],
+      challenge: ['An objection.', 'Another.'],
+      reframe: ['Another way to see it.'],
+    })
+    if (!parsed.ok) throw new Error(parsed.errors.join('\n'))
+
+    expect(parsed.document.blocks[0]?.inlines[0]).toEqual({
+      kind: 'stretch',
+      id: 'a',
+      short: 'a',
+      derive: [{ inlines: [{ kind: 'text', text: 'First step.' }] }],
+      exemplify: [
+        {
+          inlines: [
+            { kind: 'text', text: 'An example with ' },
+            { kind: 'stretch', id: 'b', short: 'a stretch', elaborate: [{ kind: 'text', text: 'a stretch inside' }] },
+          ],
+        },
+      ],
+      challenge: [{ inlines: [{ kind: 'text', text: 'An objection.' }] }, { inlines: [{ kind: 'text', text: 'Another.' }] }],
+      reframe: [{ inlines: [{ kind: 'text', text: 'Another way to see it.' }] }],
+    })
+  })
+
+  it('rejects a stretch with no operation, and a field it does not know', () => {
+    expect(stretchFrom({})).toEqual({ ok: false, errors: ['blocks[0][0]: expected at least one operation'] })
+    expect(stretchFrom({ elaborate: ['a'], chalenge: ['typo'] })).toEqual({
+      ok: false,
+      errors: ['blocks[0][0].chalenge: unknown field'],
+    })
+  })
+
+  it('rejects a passage field it does not know', () => {
+    expect(stretchFrom({ ground: [{ note: 'n', quote: 'q', dat: '2026-10-19' }] })).toEqual({
+      ok: false,
+      errors: ['blocks[0][0].ground[0].dat: unknown field'],
+    })
+  })
+
+  it('names the path of every malformed passage', () => {
+    expect(stretchFrom({ ground: 'x' })).toEqual({ ok: false, errors: ['blocks[0][0].ground: expected an array'] })
+    expect(stretchFrom({ ground: [] })).toEqual({ ok: false, errors: ['blocks[0][0].ground: expected at least one item'] })
+    expect(stretchFrom({ ground: ['x', { quote: 'q' }, { note: 'n', quote: ' ', date: 5 }] })).toEqual({
+      ok: false,
+      errors: [
+        'blocks[0][0].ground[0]: expected a passage object',
+        'blocks[0][0].ground[1].note: expected a non-empty string',
+        'blocks[0][0].ground[2].quote: expected a non-empty string',
+        'blocks[0][0].ground[2].date: expected a non-empty string',
+      ],
+    })
+  })
+
+  it('reports errors in the fixed order of the operations', () => {
+    expect(stretchFrom({ reframe: [], challenge: [], exemplify: [], derive: [], ground: [], elaborate: [] })).toEqual({
+      ok: false,
+      errors: [
+        'blocks[0][0].elaborate: expected some text',
+        'blocks[0][0].ground: expected at least one item',
+        'blocks[0][0].derive: expected at least one item',
+        'blocks[0][0].exemplify: expected at least one item',
+        'blocks[0][0].challenge: expected at least one item',
+        'blocks[0][0].reframe: expected at least one item',
+      ],
+    })
+  })
+
+  it('names the path of every malformed list item', () => {
+    expect(stretchFrom({ derive: [] })).toEqual({ ok: false, errors: ['blocks[0][0].derive: expected at least one item'] })
+    expect(stretchFrom({ challenge: [42, '  ', [{ id: 'a', short: 'dup', elaborate: ['dup'] }]] })).toEqual({
+      ok: false,
+      errors: [
+        'blocks[0][0].challenge[0]: expected a string or an array of inlines',
+        'blocks[0][0].challenge[1]: expected some text',
+        'blocks[0][0].challenge[2][0].id: duplicate stretch id "a"',
+      ],
+    })
+  })
+})
+
+describe('available and count', () => {
+  const stretch: Stretch = {
+    kind: 'stretch',
+    id: 'a',
+    short: 'a',
+    reframe: [{ inlines: [{ kind: 'text', text: 'r' }] }],
+    ground: [
+      { note: 'n', quote: 'one' },
+      { note: 'n', quote: 'two' },
+    ],
+    elaborate: [{ kind: 'text', text: 'long' }],
+  }
+
+  it('lists the operations a stretch has, in the fixed order', () => {
+    expect(available(stretch)).toEqual(['elaborate', 'ground', 'reframe'])
+  })
+
+  it('counts the items of an operation, and gives Elaborate no count', () => {
+    expect([count(stretch, 'elaborate'), count(stretch, 'ground'), count(stretch, 'reframe'), count(stretch, 'derive')]).toEqual([
+      undefined,
+      2,
+      1,
+      undefined,
+    ])
   })
 })
