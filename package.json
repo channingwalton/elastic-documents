@@ -10,6 +10,7 @@
     "dev": "vite",
     "build": "vite build",
     "export": "node scripts/export.ts",
+    "generate": "node scripts/generate.ts",
     "test": "vitest run"
   },
   "devDependencies": {

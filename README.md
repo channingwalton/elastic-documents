@@ -64,6 +64,20 @@ It currently shows a hand-written sample, [`examples/sample.json`](examples/samp
 
 The plan is to build elastic documents from an Obsidian vault. Every shorter level is a generated artefact that records the passages it came from, so *compress, do not invent* becomes the direction the build runs and stable expansions become a cache. Vault text counts as approved by its owner; only the build's output is marked as generated. See [ADR 0001](docs/adr/0001-build-elastic-documents-from-the-vault.md).
 
+The first generator builds a document from one note:
+
+```sh
+npm run generate -- "path/to/Note.md"   # a document in generated/, which git ignores
+npm run export -- "generated/Note.json"
+```
+
+- The note's text is the deepest level, as plain text: wikilinks show as Obsidian shows them, and emphasis markers, comments and frontmatter go. Each paragraph, list item or footnote is a passage. Headings and passages of 12 words or fewer stay as the author wrote them.
+- A model writes a headline above each longer passage, and a one-sentence summary between them for passages over 40 words. Both are marked as AI compressions.
+- Each generated level has a Ground: the parts of its passage it compresses, quoted by the model. The build fails, and writes nothing, unless every quote is exactly in its passage.
+- The reader cannot show tables, code or math yet, so the build skips them and says where they were.
+- The note parser reads Markdown line by line and gets some rare constructions wrong; [#16](https://github.com/channingwalton/elastic-documents/issues/16) moves it to a CommonMark parser.
+- The model is Claude, through `claude -p` (Claude Code run headless, with no tools); `--model` picks which, and Sonnet is the default. Notes holding client material need a local model, which ADR 0001 requires and which does not exist yet.
+
 ## Running it
 
 ```sh
@@ -148,13 +162,28 @@ flowchart LR
 - `src/browser/render.ts` draws the view and handles clicks and keys.
 - `src/export/build.ts` builds the reader with a given document in place of the sample, and `src/export/inline.ts` writes the script and stylesheet into the page. `scripts/export.ts` is the command.
 
+The generator is arranged the same way: a tested core, with reading the note and calling the model as adapters.
+
+```mermaid
+flowchart LR
+    N[Note Markdown] --> P[parseNote<br/>headings and passages]
+    P --> G[generate<br/>levels, marks, quote check]
+    G -->|CompressionRequest| C[Compressor port]
+    C --> A[claude -p adapter]
+    G --> J[Document JSON]
+```
+
+- `src/generate/note.ts` reads a note's Markdown as headings and plain-text passages.
+- `src/generate/generate.ts` decides which levels each passage gets, asks the `Compressor` port for them, marks their provenance and checks their quotes.
+- `src/generate/claude.ts` is the `Compressor` behind `claude -p`. `scripts/generate.ts` is the command, which reads the note and writes the document.
+
 ## Next ideas
 
 - **View filters**: "show only the assumptions" or "show only what the author said".
 - **Fisheye prerequisites**: opening a claim also brings in the claims it depends on.
 - **Orientation**: an outline, and the open state in the URL.
 - **Study conditions**: six operations against one, provenance shown or hidden, and a downloadable event log.
-- **A first real document** built from a vault note, with an error planted in generated text.
+- **A planted error**: an error in the generated text of a real document, for the first study.
 
 ## Licence
 
