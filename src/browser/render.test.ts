@@ -643,6 +643,19 @@ describe('the depth control', () => {
     expect(firstParagraph(container)).toBe('A document the reader stretches.')
   })
 
+  it('presses no depth while the page has drifted from every depth, until one is clicked', () => {
+    depthButton(2).click()
+    control(container, 'outer').click()
+    expect(firstParagraph(container)).toBe('A document the reader stretches.')
+    expect(pressedDepths().map(([, pressed]) => pressed)).toEqual(['false', 'false', 'false'])
+
+    depthButton(0).click()
+    expect(pressedDepths().map(([, pressed]) => pressed)).toEqual(['true', 'false', 'false'])
+    control(container, 'outer').click()
+    expect(firstParagraph(container)).toBe('A document the reader stretches and shrinks.')
+    expect(pressedDepths().map(([, pressed]) => pressed)).toEqual(['false', 'true', 'false'])
+  })
+
   it('shows no depth control when nothing in the document elaborates', () => {
     const plain = document.createElement('div')
     mount(plain, documentFrom({ title: 'T', blocks: [[{ id: 'a', short: 'a', ground: [{ note: 'n', quote: 'q' }] }]] }))

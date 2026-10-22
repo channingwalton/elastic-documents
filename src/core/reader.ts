@@ -38,9 +38,12 @@ export interface Effect {
   readonly keepStill: boolean
 }
 
-/** The depth the document is open to, and the deepest it can go. */
+/**
+ * The depth the document is open to, and the deepest it can go. No depth is
+ * current once the reader has opened or closed phrases so that none matches.
+ */
 export interface Depth {
-  readonly current: number
+  readonly current: number | undefined
   readonly deepest: number
 }
 
@@ -75,7 +78,7 @@ export function createReader(document: ElasticDocument): Reader {
 
   return {
     view: () => view(document, state),
-    depth: () => ({ current: state.depth, deepest }),
+    depth: () => ({ current: matchingDepth(stretches, state), deepest }),
     marking: () => ({ shown: state.showProvenance, needed }),
     dispatch: (intent) => {
       const next = transition(intent)
@@ -155,7 +158,23 @@ function deepen(
     else operations.delete('elaborate')
     put(open, stretch.id, operations)
   }
-  return { state: { ...state, open, depth }, effect: { focus: { kind: 'depth', depth }, keepStill: true } }
+  return { state: { ...state, open }, effect: { focus: { kind: 'depth', depth }, keepStill: true } }
+}
+
+/**
+ * The depth that every Elaborate is open to exactly, counting those inside
+ * closed content, or none. Every level down to the deepest holds an Elaborate,
+ * so a depth matches when each open one is shallower than each closed one.
+ */
+function matchingDepth(stretches: ReadonlyMap<string, IndexedStretch>, state: ReaderState): number | undefined {
+  let deepestOpen = 0
+  let shallowestClosed = Number.POSITIVE_INFINITY
+  for (const { stretch, level } of stretches.values()) {
+    if (stretch.elaborate === undefined) continue
+    if (openOperations(state, stretch.id).has('elaborate')) deepestOpen = Math.max(deepestOpen, level)
+    else shallowestClosed = Math.min(shallowestClosed, level)
+  }
+  return deepestOpen < shallowestClosed ? deepestOpen : undefined
 }
 
 function withOpen(state: ReaderState, id: string, operations: ReadonlySet<Operation>): ReaderState {

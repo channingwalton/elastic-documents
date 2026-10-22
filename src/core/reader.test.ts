@@ -262,7 +262,7 @@ describe('the depth', () => {
     reader.dispatch({ kind: 'activate', id: 'idea' })
     expect(reader.view()[0]?.inlines[1]).toEqual(closedPhrase('idea', 'stretchtext'))
     expect(reader.view()[1]?.inlines[1]).toEqual(closedPhrase('more', 'more'))
-    expect(reader.depth()).toEqual({ current: 1, deepest: 2 })
+    expect(reader.depth()).toEqual({ current: 0, deepest: 2 })
 
     reader.dispatch({ kind: 'depth', depth: 1 })
     expect(reader.view()[0]?.inlines[1]).toMatchObject({ kind: 'long', id: 'idea' })
@@ -273,6 +273,50 @@ describe('the depth', () => {
     expect(reader.view()).toEqual(createReader(rich).view())
     reader.dispatch({ kind: 'activate', id: 'more' })
     expect(reader.view()[1]?.inlines[1]).toMatchObject({ kind: 'long', inlines: [text('more '), closedPhrase('inner', 'detail')] })
+  })
+
+  it('reports no depth while what is open matches none, and the depth again once it matches one', () => {
+    const reader = createReader(rich)
+    reader.dispatch({ kind: 'depth', depth: 1 })
+
+    reader.dispatch({ kind: 'toggle', id: 'idea', operation: 'elaborate' })
+    expect(reader.depth()).toEqual({ current: undefined, deepest: 2 })
+    reader.dispatch({ kind: 'toggle', id: 'idea', operation: 'elaborate' })
+    expect(reader.depth()).toEqual({ current: 1, deepest: 2 })
+
+    reader.dispatch({ kind: 'activate', id: 'inner' })
+    expect(reader.depth()).toEqual({ current: 2, deepest: 2 })
+  })
+
+  it('counts a phrase left open inside a long form the reader closed', () => {
+    const reader = createReader(rich)
+    reader.dispatch({ kind: 'depth', depth: 2 })
+    reader.dispatch({ kind: 'toggle', id: 'more', operation: 'elaborate' })
+    reader.dispatch({ kind: 'toggle', id: 'idea', operation: 'elaborate' })
+
+    expect(reader.view()).toEqual(createReader(rich).view())
+    expect(reader.depth()).toEqual({ current: undefined, deepest: 2 })
+  })
+
+  it('counts a phrase left open inside content the reader closed beneath a phrase', () => {
+    const reader = createReader(
+      documentFrom({ title: 'T', blocks: [[{ id: 'a', short: 'a', exemplify: [[{ id: 'b', short: 'b', elaborate: ['b inside'] }]] }]] }),
+    )
+    reader.dispatch({ kind: 'activate', id: 'a' })
+    reader.dispatch({ kind: 'activate', id: 'b' })
+    expect(reader.depth()).toEqual({ current: 1, deepest: 1 })
+
+    reader.dispatch({ kind: 'activate', id: 'a' })
+    expect(reader.depth()).toEqual({ current: 1, deepest: 1 })
+  })
+
+  it('keeps the depth while the reader opens and closes the other operations', () => {
+    const reader = createReader(rich)
+    reader.dispatch({ kind: 'depth', depth: 1 })
+    reader.dispatch({ kind: 'toggle', id: 'idea', operation: 'ground' })
+    reader.dispatch({ kind: 'activate', id: 'outer' })
+
+    expect(reader.depth()).toEqual({ current: 1, deepest: 2 })
   })
 
   it('changes only Elaborate, leaving the other operations and the buttons shown as the reader set them', () => {
@@ -334,6 +378,16 @@ describe('the depth', () => {
     const many = Array.from({ length: 150_000 }, (_, i) => ({ id: `s${i}`, short: 's', elaborate: ['s'] }))
 
     expect(createReader(documentFrom({ title: 'T', blocks: [many] })).depth()).toEqual({ current: 0, deepest: 1 })
+  })
+
+  it('matches the depth in a document with very many phrases', () => {
+    const many = Array.from({ length: 150_000 }, (_, i) => ({ id: `s${i}`, short: 's', elaborate: ['s'] }))
+    const reader = createReader(documentFrom({ title: 'T', blocks: [many] }))
+
+    reader.dispatch({ kind: 'activate', id: 's0' })
+    expect(reader.depth()).toEqual({ current: undefined, deepest: 1 })
+    reader.dispatch({ kind: 'depth', depth: 1 })
+    expect(reader.depth()).toEqual({ current: 1, deepest: 1 })
   })
 
   it('ignores a depth the document does not have', () => {
