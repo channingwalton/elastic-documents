@@ -1,19 +1,32 @@
-import { available, indexStretches, type ElasticDocument, type IndexedStretch, type Operation, type Stretch } from './document'
+import {
+  available,
+  hasUnapprovedText,
+  indexStretches,
+  type ElasticDocument,
+  type IndexedStretch,
+  type Operation,
+  type Stretch,
+} from './document'
 import { emptyState, openOperations, showsChips, type ReaderState } from './state'
 import { view, type ViewBlock } from './view'
 
-/** What the reader asked for: to activate a phrase, to toggle one of its operations, or to open the document to a depth. */
+/**
+ * What the reader asked for: to activate a phrase, to toggle one of its
+ * operations, to open the document to a depth, or to show or hide provenance.
+ */
 export type Intent =
   | { readonly kind: 'activate'; readonly id: string }
   | { readonly kind: 'toggle'; readonly id: string; readonly operation: Operation }
   | { readonly kind: 'depth'; readonly depth: number }
+  | { readonly kind: 'provenance' }
 
-type PhraseIntent = Exclude<Intent, { readonly kind: 'depth' }>
+type PhraseIntent = Extract<Intent, { readonly kind: 'activate' | 'toggle' }>
 
 export type FocusTarget =
   | { readonly kind: 'phrase' | 'long'; readonly id: string }
   | { readonly kind: 'chip' | 'attachment'; readonly id: string; readonly operation: Operation }
   | { readonly kind: 'depth'; readonly depth: number }
+  | { readonly kind: 'provenance' }
 
 /**
  * Where focus goes after an intent, and whether a click should leave the page
@@ -31,9 +44,16 @@ export interface Depth {
   readonly deepest: number
 }
 
+/** Whether the page marks provenance, and whether the document has any text but approved text to mark. */
+export interface Marking {
+  readonly shown: boolean
+  readonly needed: boolean
+}
+
 export interface Reader {
   readonly view: () => ViewBlock[]
   readonly depth: () => Depth
+  readonly marking: () => Marking
   readonly dispatch: (intent: Intent) => Effect | undefined
 }
 
@@ -41,10 +61,14 @@ export function createReader(document: ElasticDocument): Reader {
   const stretches = indexStretches(document)
   let deepest = 0
   for (const { stretch, level } of stretches.values()) if (stretch.elaborate) deepest = Math.max(deepest, level)
+  const needed = hasUnapprovedText(document)
   let state = emptyState
 
   const transition = (intent: Intent): Transition | undefined => {
     if (intent.kind === 'depth') return deepen(stretches, deepest, state, intent.depth)
+    if (intent.kind === 'provenance') {
+      return { state: { ...state, showProvenance: !state.showProvenance }, effect: { focus: { kind: 'provenance' }, keepStill: true } }
+    }
     const indexed = stretches.get(intent.id)
     return indexed && apply(indexed.stretch, state, intent)
   }
@@ -52,6 +76,7 @@ export function createReader(document: ElasticDocument): Reader {
   return {
     view: () => view(document, state),
     depth: () => ({ current: state.depth, deepest }),
+    marking: () => ({ shown: state.showProvenance, needed }),
     dispatch: (intent) => {
       const next = transition(intent)
       if (next) state = next.state

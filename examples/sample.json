@@ -1,29 +1,35 @@
 {
   "title": "Elastic Documents",
   "blocks": [
-    [
-      "An elastic document is ",
-      {
-        "id": "stretch",
-        "short": "one the reader stretches and shrinks in place",
-        "elaborate": [
-          "one the reader stretches and shrinks in place. A summary opens into ",
-          {
-            "id": "opens-into",
-            "short": "its detail",
-            "elaborate": ["its detail, its sources, an example or its objections"]
+    {
+      "provenance": "compression",
+      "inlines": [
+        "An elastic document is ",
+        {
+          "id": "stretch",
+          "short": "one the reader stretches and shrinks in place",
+          "elaborate": {
+            "provenance": "approved",
+            "inlines": [
+              "one the reader stretches and shrinks in place. A summary opens into ",
+              {
+                "id": "opens-into",
+                "short": { "provenance": "compression", "text": "its detail" },
+                "elaborate": ["its detail, its sources, an example or its objections"]
+              },
+              ", and closes back again, while the reader stays oriented throughout"
+            ]
           },
-          ", and closes back again, while the reader stays oriented throughout"
-        ],
-        "reframe": ["Like zooming into a map: the same territory, with more detail the closer you look."]
-      },
-      "."
-    ],
+          "reframe": ["Like zooming into a map: the same territory, with more detail the closer you look."]
+        },
+        "."
+      ]
+    },
     [
       "The idea is ",
       {
         "id": "nelson",
-        "short": "Ted Nelson's stretchtext",
+        "short": { "provenance": "compression", "text": "Ted Nelson's stretchtext" },
         "elaborate": [
           "Ted Nelson's stretchtext, from his Hypertext Note 8 of 1967, renamed so the wider business can see what it means"
         ],
@@ -40,38 +46,44 @@
       },
       "."
     ],
-    [
-      {
-        "id": "why-now",
-        "short": "It never spread",
-        "elaborate": [
-          "It never spread, because an author had to write every level by hand. ",
-          {
-            "id": "llm",
-            "short": "An LLM can now produce the levels",
-            "elaborate": [
-              "An LLM can now produce the levels, though it shortens text well and expands it poorly, and expansion invites invention"
+    {
+      "provenance": "compression",
+      "inlines": [
+        {
+          "id": "why-now",
+          "short": "It never spread",
+          "elaborate": {
+            "provenance": "approved",
+            "inlines": [
+              "It never spread, because an author had to write every level by hand. ",
+              {
+                "id": "llm",
+                "short": "An LLM can now produce the levels",
+                "elaborate": [
+                  "An LLM can now produce the levels, though it shortens text well and expands it poorly, and expansion invites invention"
+                ]
+              }
             ]
-          }
-        ],
-        "ground": [
-          {
-            "note": "Elastic Documents",
-            "date": "2026-10-19",
-            "quote": "Elastic documents never spread because an author had to write every level by hand. An LLM can now produce the levels. The open question is fidelity: whether the reader can always tell what the author said from what the AI added."
-          }
-        ],
-        "derive": [
-          "An author had to write every level of detail by hand.",
-          "Writing every level costs more than most documents can bear.",
-          "So stretchtext stayed a demonstration rather than a way of writing."
-        ],
-        "challenge": [
-          "LLMs shorten text well and expand it poorly, and expansion invites invention (Jensenius 2025)."
-        ]
-      },
-      "."
-    ],
+          },
+          "ground": [
+            {
+              "note": "Elastic Documents",
+              "date": "2026-10-19",
+              "quote": "Elastic documents never spread because an author had to write every level by hand. An LLM can now produce the levels. The open question is fidelity: whether the reader can always tell what the author said from what the AI added."
+            }
+          ],
+          "derive": [
+            "An author had to write every level of detail by hand.",
+            "Writing every level costs more than most documents can bear.",
+            "So stretchtext stayed a demonstration rather than a way of writing."
+          ],
+          "challenge": [
+            "LLMs shorten text well and expand it poorly, and expansion invites invention (Jensenius 2025)."
+          ]
+        },
+        "."
+      ]
+    },
     [
       "Elastic documents are ",
       {

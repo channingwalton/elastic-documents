@@ -1,12 +1,22 @@
-import { isOperation, operationInfo, type ElasticDocument, type Operation, type Passage } from '../core/document'
-import { createReader, type Depth, type FocusTarget, type Intent } from '../core/reader'
+import {
+  isOperation,
+  operationInfo,
+  provenanceLabel,
+  provenances,
+  type ElasticDocument,
+  type Operation,
+  type Passage,
+  type Provenance,
+} from '../core/document'
+import { createReader, type Depth, type FocusTarget, type Intent, type Marking } from '../core/reader'
 import type { Chip, ViewAttachment, ViewBlock, ViewInline } from '../core/view'
 
 /**
  * Draws the document into the container and forwards the reader's clicks and
  * keys to the core as intents. A closed phrase is a control; its operation
  * buttons sit beside it and an elaborated phrase ends with them, so no control
- * ever sits inside another. The depth control sits beneath the title.
+ * ever sits inside another. The depth control and the provenance switch sit
+ * beneath the title.
  */
 export function mount(container: HTMLElement, elastic: ElasticDocument): void {
   const reader = createReader(elastic)
@@ -15,7 +25,12 @@ export function mount(container: HTMLElement, elastic: ElasticDocument): void {
   let clickActed = false
 
   const draw = (): void => {
-    container.replaceChildren(element('h1', elastic.title), ...depthControl(reader.depth()), ...reader.view().flatMap(renderBlock))
+    container.replaceChildren(
+      element('h1', elastic.title),
+      ...depthControl(reader.depth()),
+      ...provenanceControl(reader.marking()),
+      ...reader.view().flatMap(renderBlock),
+    )
   }
 
   const dispatchAt = (target: EventTarget | null, byClick: boolean): boolean => {
@@ -43,14 +58,17 @@ export function mount(container: HTMLElement, elastic: ElasticDocument): void {
 }
 
 function controlAt(target: EventTarget | null): HTMLElement | null {
-  return target instanceof Element ? target.closest<HTMLElement>('[data-activate], [data-toggle], [data-depth]') : null
+  return target instanceof Element
+    ? target.closest<HTMLElement>('[data-activate], [data-toggle], [data-depth], [data-provenance]')
+    : null
 }
 
 function intentOf(control: HTMLElement | null): Intent | undefined {
-  const { activate, toggle, operation, depth } = control?.dataset ?? {}
+  const { activate, toggle, operation, depth, provenance } = control?.dataset ?? {}
   if (activate !== undefined) return { kind: 'activate', id: activate }
   if (toggle !== undefined && isOperation(operation)) return { kind: 'toggle', id: toggle, operation }
   if (depth !== undefined) return { kind: 'depth', depth: Number(depth) }
+  if (provenance !== undefined) return { kind: 'provenance' }
   return undefined
 }
 
@@ -82,6 +100,8 @@ function findFocusTarget(container: HTMLElement, focus: FocusTarget): HTMLElemen
       return byId(elementId.chip(focus.id, focus.operation))
     case 'depth':
       return byId(elementId.depth(focus.depth))
+    case 'provenance':
+      return byId(elementId.provenance)
   }
 }
 
@@ -113,10 +133,61 @@ function depthControl({ current, deepest }: Depth): HTMLElement[] {
   return [group]
 }
 
+/** A switch that shows or hides provenance, with a legend while it shows; none if every level is approved. */
+function provenanceControl({ shown, needed }: Marking): HTMLElement[] {
+  if (!needed) return []
+  const row = document.createElement('div')
+  row.className = 'provenance'
+  const toggle = element('span', 'Provenance')
+  toggle.id = elementId.provenance
+  toggle.dataset.provenance = ''
+  toggle.title = `${shown ? 'Hide' : 'Show'} where the text came from`
+  makeControl(toggle)
+  toggle.setAttribute('aria-pressed', String(shown))
+  row.append(toggle)
+  if (shown) row.append(legend())
+  return [row]
+}
+
+/** Each provenance in its own style, after its mark. The marks are hidden from screen readers, which hear the names. */
+function legend(): HTMLElement {
+  const list = document.createElement('span')
+  list.className = 'provenance-legend'
+  list.append(
+    ...provenances.map((provenance) => {
+      const mark = provenanceMark(provenance)
+      mark.setAttribute('aria-hidden', 'true')
+      const item = element('span', provenanceLabel[provenance], provenanceClass(provenance))
+      item.prepend(mark)
+      return item
+    }),
+  )
+  return list
+}
+
+/** Styles an element after its provenance, when it has one, and returns the mark to put before its text. */
+function marks(level: HTMLElement, provenance: Provenance | undefined): HTMLElement[] {
+  if (provenance === undefined) return []
+  level.classList.add(provenanceClass(provenance))
+  const mark = provenanceMark(provenance)
+  mark.setAttribute('role', 'img')
+  nameGlyph(mark, provenanceLabel[provenance])
+  return [mark]
+}
+
+/** Empty, with its glyph drawn by CSS, so it stays out of the prose and out of copied text. */
+function provenanceMark(provenance: Provenance): HTMLElement {
+  const mark = document.createElement('span')
+  mark.className = `provenance-mark ${provenanceClass(provenance)}`
+  return mark
+}
+
+const provenanceClass = (provenance: Provenance): string => `provenance-${provenance}`
+
 /** A block is a paragraph followed by the content its phrases have opened beneath it. */
 function renderBlock(block: ViewBlock): Node[] {
   const p = document.createElement('p')
-  p.append(...block.inlines.flatMap((inline) => renderInline(inline, 0)))
+  p.append(...marks(p, block.provenance), ...block.inlines.flatMap((inline) => renderInline(inline, 0)))
   return [p, ...block.attachments.map(renderAttachment)]
 }
 
@@ -132,10 +203,11 @@ function renderInline(inline: ViewInline, depth: number): Node[] {
     phrase.textContent = inline.text
     makeControl(phrase)
     phrase.setAttribute('aria-expanded', String(inline.chips.length > 0))
-    if (inline.chips.length === 0) return [phrase]
+    const marked = [...marks(phrase, inline.provenance), phrase]
+    if (inline.chips.length === 0) return marked
     const opened = inline.chips.flatMap((chip) => revealedOutside(inline.id, chip) ?? [])
     phrase.setAttribute('aria-controls', [elementId.chips(inline.id), ...opened].join(' '))
-    return [phrase, chipRow(inline.id, inline.text, inline.chips)]
+    return [...marked, chipRow(inline.id, inline.text, inline.chips)]
   }
 
   const long = document.createElement('span')
@@ -144,7 +216,11 @@ function renderInline(inline: ViewInline, depth: number): Node[] {
   long.tabIndex = -1
   long.setAttribute('role', 'group')
   long.setAttribute('aria-label', `Expanded: ${inline.short}`)
-  long.append(...inline.inlines.flatMap((child) => renderInline(child, depth + 1)), chipRow(inline.id, inline.short, inline.chips))
+  long.append(
+    ...marks(long, inline.provenance),
+    ...inline.inlines.flatMap((child) => renderInline(child, depth + 1)),
+    chipRow(inline.id, inline.short, inline.chips),
+  )
   return [long]
 }
 
@@ -246,6 +322,7 @@ export const elementId = {
   /** The elaborated text for Elaborate; the content opened beneath for the others. */
   revealed: (id: string, operation: Operation): string => `elastic-${operation}-${id}`,
   depth: (depth: number): string => `elastic-depth-${depth}`,
+  provenance: 'elastic-provenance',
 }
 
 function makeControl(control: HTMLElement): void {

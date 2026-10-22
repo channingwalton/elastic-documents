@@ -608,6 +608,122 @@ describe('the depth control', () => {
   })
 })
 
+describe('provenance marking', () => {
+  const marked = documentFrom({
+    title: 'T',
+    blocks: [
+      [
+        'The idea is ',
+        {
+          id: 'idea',
+          short: { provenance: 'compression', text: 'stretchtext' },
+          elaborate: ['stretchtext, from 1967'],
+          challenge: ['An objection.'],
+        },
+        '.',
+      ],
+      {
+        provenance: 'compression',
+        inlines: ['A summary of ', { id: 'sum', short: 'the detail', elaborate: { provenance: 'approved', inlines: ['the detail in full'] } }, '.'],
+      },
+    ],
+  })
+  const provenanceClasses = '.provenance-approved, .provenance-compression, .provenance-addition'
+
+  let container: HTMLElement
+
+  beforeEach(() => {
+    container = document.createElement('div')
+    document.body.replaceChildren(container)
+    mount(container, marked)
+  })
+
+  function provenanceSwitch(): HTMLElement {
+    const element = byId(container, elementId.provenance)
+    if (!element) throw new Error('no provenance switch')
+    return element
+  }
+
+  /** The name of a mark, which must be drawn only by CSS so it stays out of the text. */
+  function markName(mark: Element | null | undefined): string | null | undefined {
+    expect(mark?.classList.contains('provenance-mark')).toBe(true)
+    expect(mark?.getAttribute('role')).toBe('img')
+    expect(mark?.textContent).toBe('')
+    return mark?.getAttribute('aria-label')
+  }
+
+  function paragraphs(): HTMLParagraphElement[] {
+    return [...container.querySelectorAll('p')]
+  }
+
+  it('marks a level whose provenance changes with its class and a named mark before it, keeping the text as it was', () => {
+    const [idea, summary] = paragraphs()
+
+    expect(paragraphs().map((p) => p.textContent)).toEqual(['The idea is stretchtext.', 'A summary of the detail.'])
+    expect(idea?.className).toBe('')
+    expect(control(container, 'idea').classList).toContain('provenance-compression')
+    expect(markName(control(container, 'idea').previousElementSibling)).toBe('AI compression')
+    expect(summary?.className).toBe('provenance-compression')
+    expect(markName(summary?.firstElementChild)).toBe('AI compression')
+    expect(control(container, 'sum').className).toBe('stretch')
+    expect(container.querySelectorAll('p .provenance-mark')).toHaveLength(2)
+  })
+
+  it('marks a long form against the text around it, and content opened beneath against the page', () => {
+    control(container, 'sum').click()
+    control(container, 'idea').click()
+    chip(container, 'idea', 'challenge').click()
+
+    expect(stretch(container, 'sum').classList).toContain('provenance-approved')
+    expect(markName(stretch(container, 'sum').firstElementChild)).toBe('Approved')
+    const objection = attachment(container, 'idea', 'challenge')?.querySelector('p')
+    expect(objection?.className).toBe('provenance-addition')
+    expect(markName(objection?.firstElementChild)).toBe('AI addition')
+  })
+
+  it('hides and shows every mark from a switch beneath the title, keeping focus on it and the page still', () => {
+    const focus = vi.spyOn(HTMLElement.prototype, 'focus')
+    try {
+      expect(provenanceSwitch().textContent).toBe('Provenance')
+      expect(provenanceSwitch().getAttribute('role')).toBe('button')
+      expect(provenanceSwitch().getAttribute('aria-pressed')).toBe('true')
+
+      provenanceSwitch().click()
+      expect(provenanceSwitch().getAttribute('aria-pressed')).toBe('false')
+      expect(container.querySelectorAll(`.provenance-mark, ${provenanceClasses}`)).toHaveLength(0)
+      expect(document.activeElement).toBe(provenanceSwitch())
+      expect(focus.mock.lastCall?.[0]).toEqual({ preventScroll: true })
+
+      expect(press(provenanceSwitch(), 'Enter').defaultPrevented).toBe(true)
+      expect(provenanceSwitch().getAttribute('aria-pressed')).toBe('true')
+      expect(paragraphs()[1]?.className).toBe('provenance-compression')
+    } finally {
+      focus.mockRestore()
+    }
+  })
+
+  it('explains each mark beside the switch while they show, without naming them twice to a screen reader', () => {
+    const legend = () => [...container.querySelectorAll('.provenance-legend > *')]
+
+    expect(legend().map((item) => [item.className, item.textContent])).toEqual([
+      ['provenance-approved', 'Approved'],
+      ['provenance-compression', 'AI compression'],
+      ['provenance-addition', 'AI addition'],
+    ])
+    expect(legend().map((item) => item.querySelector('.provenance-mark')?.getAttribute('aria-hidden'))).toEqual(['true', 'true', 'true'])
+
+    provenanceSwitch().click()
+    expect(legend()).toEqual([])
+  })
+
+  it('shows no switch when every level is approved', () => {
+    const plain = document.createElement('div')
+    mount(plain, nested)
+
+    expect(plain.querySelector(`#${elementId.provenance}, .provenance-legend`)).toBeNull()
+  })
+})
+
 describe('showErrors', () => {
   it('lists each parse error', () => {
     const container = document.createElement('div')

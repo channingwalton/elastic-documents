@@ -54,6 +54,7 @@ The questions the spike should help answer:
 - **Expand and collapse in place.** Click a dotted phrase, or focus it and press Enter or Space.
 - **Typed operations.** A phrase with one operation opens it straight away. A phrase with several shows a button for each, with a count of items. Elaborate replaces the phrase in place; the other operations open beneath its paragraph, each with a close control. Clicking a phrase with anything open closes it all.
 - **Depth control.** A row of buttons beneath the title opens the whole document to a depth, a cheap form of semantic zooming (Engelbart's level clipping). Depth 0 shows the short forms; depth N opens every Elaborate from level 1 down to N. Levels start again at 1 inside content opened beneath a phrase. Choosing a depth resets whatever the reader opened or closed by hand.
+- **Provenance marking.** Every paragraph, short form and long form is approved (written or approved by the author), an AI compression of approved text, or an AI addition. The author's words keep the body face. AI text takes a sans face and its own colour: upright for a compression, italic for an addition. A mark (✓, ≈ or ✦), which screen readers announce, names the provenance at the start of each level that differs from the text around it. Nothing marks where the text returns to the provenance around it, though the face and colour change back. A legend beside the Provenance switch explains the marks, and the switch hides them all.
 - **Keyboard and screen reader support.** Every control is focusable, focus follows what opens and closes, and controls name what they reveal.
 
 It currently shows a hand-written sample, [`examples/sample.json`](examples/sample.json).
@@ -99,6 +100,32 @@ A document is JSON. In a block, a string is text and an object is a stretch: a p
 - `derive`, `exemplify`, `challenge` and `reframe` hold paragraphs. A string stands for a paragraph of plain text; an array holds text and stretches.
 - Every stretch needs a unique `id` without spaces, a non-blank `short` and at least one operation. The parser reports every error with its path.
 
+### Provenance
+
+A paragraph, short form or long form can be marked with where it came from: `approved`, `compression` or `addition`. A marked paragraph or long form is written `{ "provenance": ..., "inlines": [...] }`, and a marked short form `{ "provenance": ..., "text": "..." }`.
+
+```json
+{
+  "provenance": "compression",
+  "inlines": [
+    "The idea is ",
+    {
+      "id": "nelson",
+      "short": "Ted Nelson's stretchtext",
+      "elaborate": {
+        "provenance": "approved",
+        "inlines": ["Ted Nelson's stretchtext, from his Hypertext Note 8 of 1967"]
+      }
+    },
+    "."
+  ]
+}
+```
+
+- An unmarked level takes the provenance of the level around it, and the top level is approved. So this short form is a compression, like its paragraph. A long form takes the provenance of the text around its phrase, not of its short form.
+- A mark the build forgets inside a compressed level leaves the text marked as AI text, not as approved. A forgotten mark on a top-level paragraph does show as approved, so the build must mark every paragraph it writes.
+- Exemplify, Challenge and Reframe content is an addition, and so is every level inside an addition; any other mark there is an error. Ground quotes are always approved and take no mark.
+
 ## How the code is arranged
 
 The logic lives in a tested core with no DOM. The browser code draws what the core says and forwards the reader's clicks and keys to it as intents.
@@ -108,17 +135,16 @@ flowchart LR
     J[Document JSON] --> P[parseDocument]
     P --> R[Reader core<br/>state and transitions]
     R -->|view model| B[Browser adapter<br/>draws the page]
-    B -->|intents: activate, toggle, depth| R
+    B -->|intents: activate, toggle, depth, provenance| R
 ```
 
 - `src/core/document.ts` parses and validates documents.
 - `src/core/state.ts` and `src/core/reader.ts` hold what is open and decide what each intent does, including where focus goes.
-- `src/core/view.ts` turns the document and state into what the reader sees.
+- `src/core/view.ts` turns the document and state into what the reader sees, including where provenance changes.
 - `src/browser/render.ts` draws the view and handles clicks and keys.
 
 ## Next ideas
 
-- **Provenance marking**: style the author's words, AI compressions and AI additions differently.
 - **View filters**: "show only the assumptions" or "show only what the author said".
 - **Fisheye prerequisites**: opening a claim also brings in the claims it depends on.
 - **Orientation**: an outline, and the open state in the URL.

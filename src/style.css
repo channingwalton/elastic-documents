@@ -7,6 +7,8 @@
   --focus: #2f6fdb;
   --control: #5b6270;
   --attachment: #f3f1ea;
+  --compression: #1f5f58;
+  --addition: #7a2f6c;
   color-scheme: light;
 }
 
@@ -20,6 +22,8 @@
     --focus: #79a6f2;
     --control: #aab3c0;
     --attachment: #25272b;
+    --compression: #7ccfc2;
+    --addition: #e3a5d6;
     color-scheme: dark;
   }
 }
@@ -52,6 +56,26 @@ h1 {
   font: 0.8rem/1 system-ui, sans-serif;
 }
 
+.depth + .provenance {
+  margin-top: -0.8rem;
+}
+
+.provenance {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35em 1em;
+  align-items: center;
+  margin: -0.4rem 0 1.4rem;
+  color: var(--control);
+  font: 0.8rem/1 system-ui, sans-serif;
+}
+
+.provenance-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35em 1em;
+}
+
 .depth-label {
   margin-right: 0.3em;
   font-weight: 600;
@@ -59,7 +83,8 @@ h1 {
   text-transform: uppercase;
 }
 
-.depth [data-depth] {
+.depth [data-depth],
+[data-provenance] {
   min-width: 1ch;
   padding: 0.3em 0.65em;
   border: 1px solid var(--control);
@@ -68,7 +93,8 @@ h1 {
   text-align: center;
 }
 
-.depth [aria-pressed='true'] {
+.depth [aria-pressed='true'],
+[data-provenance][aria-pressed='true'] {
   background: var(--control);
   color: var(--background);
 }
@@ -93,6 +119,51 @@ h1 {
 
 .stretch.shade-2 {
   background: var(--open-2);
+}
+
+/*
+ * Provenance shows where a level's text came from. The author's words keep the
+ * body face; AI text takes the sans face, upright for a compression and italic
+ * for an addition. A mark drawn before the level names it.
+ */
+.provenance-approved {
+  color: var(--text);
+  font-family: Georgia, 'Times New Roman', serif;
+  font-style: normal;
+}
+
+.provenance-compression,
+.provenance-addition {
+  font-family: system-ui, sans-serif;
+}
+
+.provenance-compression {
+  color: var(--compression);
+  font-style: normal;
+}
+
+.provenance-addition {
+  color: var(--addition);
+  font-style: italic;
+}
+
+.provenance-mark::before {
+  display: inline;
+  margin-right: 0.3em;
+  font: normal 600 0.75em/1 system-ui, sans-serif;
+  vertical-align: 0.15em;
+}
+
+.provenance-mark.provenance-approved::before {
+  content: '\2713';
+}
+
+.provenance-mark.provenance-compression::before {
+  content: '\2248';
+}
+
+.provenance-mark.provenance-addition::before {
+  content: '\2726';
 }
 
 .collapse {
@@ -214,6 +285,7 @@ h1 {
 
 .stretch:focus-visible,
 .depth [data-depth]:focus-visible,
+[data-provenance]:focus-visible,
 .collapse:focus-visible,
 .chip:focus-visible,
 .close:focus-visible,

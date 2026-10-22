@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { available, count, indexStretches, parseDocument, type Stretch } from './document'
+import { available, count, indexStretches, parseDocument, type ElasticDocument, type Inline, type Stretch } from './document'
+import sample from '../../examples/sample.json'
 import { documentFrom } from './testing'
 
 describe('parseDocument', () => {
@@ -25,21 +26,25 @@ describe('parseDocument', () => {
         title: 'Elastic Documents',
         blocks: [
           {
+            provenance: 'approved',
             inlines: [
               { kind: 'text', text: 'A document ' },
               {
                 kind: 'stretch',
                 id: 'reader',
-                short: 'the reader stretches',
-                elaborate: [
-                  { kind: 'text', text: 'the reader stretches ' },
-                  {
-                    kind: 'stretch',
-                    id: 'shrinks',
-                    short: 'and shrinks',
-                    elaborate: [{ kind: 'text', text: 'and shrinks again' }],
-                  },
-                ],
+                short: { provenance: 'approved', text: 'the reader stretches' },
+                elaborate: {
+                  provenance: 'approved',
+                  inlines: [
+                    { kind: 'text', text: 'the reader stretches ' },
+                    {
+                      kind: 'stretch',
+                      id: 'shrinks',
+                      short: { provenance: 'approved', text: 'and shrinks' },
+                      elaborate: { provenance: 'approved', inlines: [{ kind: 'text', text: 'and shrinks again' }] },
+                    },
+                  ],
+                },
               },
               { kind: 'text', text: '.' },
             ],
@@ -75,11 +80,11 @@ describe('parseDocument', () => {
     expect(parsed).toEqual({
       ok: false,
       errors: [
-        'blocks[0]: expected an array of inlines',
+        'blocks[0]: expected an array of inlines or { provenance, inlines }',
         'blocks[1][0]: expected a string or a stretch object',
         'blocks[1][1].short: expected a non-empty string',
         'blocks[1][2].short: expected a non-empty string',
-        'blocks[1][3].elaborate: expected an array of inlines',
+        'blocks[1][3].elaborate: expected an array of inlines or { provenance, inlines }',
         'blocks[1][4].elaborate: expected some text',
       ],
     })
@@ -153,11 +158,12 @@ describe('parseDocument operations', () => {
         title: 'T',
         blocks: [
           {
+            provenance: 'approved',
             inlines: [
               {
                 kind: 'stretch',
                 id: 'a',
-                short: 'a',
+                short: { provenance: 'approved', text: 'a' },
                 ground: [
                   { note: 'Stretchtext', date: '2026-10-19', quote: 'the reader remains oriented' },
                   { note: 'Elastic Documents', quote: 'A summary opens into its detail.' },
@@ -182,18 +188,27 @@ describe('parseDocument operations', () => {
     expect(parsed.document.blocks[0]?.inlines[0]).toEqual({
       kind: 'stretch',
       id: 'a',
-      short: 'a',
-      derive: [{ inlines: [{ kind: 'text', text: 'First step.' }] }],
+      short: { provenance: 'approved', text: 'a' },
+      derive: [{ provenance: 'approved', inlines: [{ kind: 'text', text: 'First step.' }] }],
       exemplify: [
         {
+          provenance: 'addition',
           inlines: [
             { kind: 'text', text: 'An example with ' },
-            { kind: 'stretch', id: 'b', short: 'a stretch', elaborate: [{ kind: 'text', text: 'a stretch inside' }] },
+            {
+              kind: 'stretch',
+              id: 'b',
+              short: { provenance: 'addition', text: 'a stretch' },
+              elaborate: { provenance: 'addition', inlines: [{ kind: 'text', text: 'a stretch inside' }] },
+            },
           ],
         },
       ],
-      challenge: [{ inlines: [{ kind: 'text', text: 'An objection.' }] }, { inlines: [{ kind: 'text', text: 'Another.' }] }],
-      reframe: [{ inlines: [{ kind: 'text', text: 'Another way to see it.' }] }],
+      challenge: [
+        { provenance: 'addition', inlines: [{ kind: 'text', text: 'An objection.' }] },
+        { provenance: 'addition', inlines: [{ kind: 'text', text: 'Another.' }] },
+      ],
+      reframe: [{ provenance: 'addition', inlines: [{ kind: 'text', text: 'Another way to see it.' }] }],
     })
   })
 
@@ -245,9 +260,209 @@ describe('parseDocument operations', () => {
     expect(stretchFrom({ challenge: [42, '  ', [{ id: 'a', short: 'dup', elaborate: ['dup'] }]] })).toEqual({
       ok: false,
       errors: [
-        'blocks[0][0].challenge[0]: expected a string or an array of inlines',
+        'blocks[0][0].challenge[0]: expected a string, an array of inlines or { provenance, inlines }',
         'blocks[0][0].challenge[1]: expected some text',
         'blocks[0][0].challenge[2][0].id: duplicate stretch id "a"',
+      ],
+    })
+  })
+})
+
+/** Every paragraph, short form and long form in the document with its provenance, in document order. */
+function levels(document: ElasticDocument): string[] {
+  const found: string[] = []
+  const visit = (inlines: readonly Inline[]): void => {
+    for (const inline of inlines) {
+      if (inline.kind === 'text') continue
+      found.push(`${inline.id}.short: ${inline.short.provenance}`)
+      if (inline.elaborate) {
+        found.push(`${inline.id}.elaborate: ${inline.elaborate.provenance}`)
+        visit(inline.elaborate.inlines)
+      }
+      for (const operation of ['derive', 'exemplify', 'challenge', 'reframe'] as const) {
+        inline[operation]?.forEach((block, i) => {
+          found.push(`${inline.id}.${operation}[${i}]: ${block.provenance}`)
+          visit(block.inlines)
+        })
+      }
+    }
+  }
+  document.blocks.forEach((block, i) => {
+    found.push(`blocks[${i}]: ${block.provenance}`)
+    visit(block.inlines)
+  })
+  return found
+}
+
+describe('parseDocument provenance', () => {
+  it('gives an unmarked level the provenance of the level around it, starting from approved', () => {
+    const document = documentFrom({
+      title: 'T',
+      blocks: [
+        ['An author paragraph with ', { id: 'a', short: 'a phrase', elaborate: ['a phrase ', { id: 'b', short: 'inside', derive: ['A step.'] }] }],
+        { provenance: 'compression', inlines: ['A summary with ', { id: 'c', short: 'a phrase', elaborate: ['a longer phrase'], derive: ['A step.'] }] },
+      ],
+    })
+
+    expect(levels(document)).toEqual([
+      'blocks[0]: approved',
+      'a.short: approved',
+      'a.elaborate: approved',
+      'b.short: approved',
+      'b.derive[0]: approved',
+      'blocks[1]: compression',
+      'c.short: compression',
+      'c.elaborate: compression',
+      'c.derive[0]: compression',
+    ])
+  })
+
+  it('reads a mark on a paragraph, short form or long form, which the levels inside it then take', () => {
+    const document = documentFrom({
+      title: 'T',
+      blocks: [
+        {
+          provenance: 'compression',
+          inlines: [
+            {
+              id: 'a',
+              short: 'a summary',
+              elaborate: {
+                provenance: 'approved',
+                inlines: ["the author's words, with ", { id: 'b', short: { provenance: 'compression', text: 'a summary' }, elaborate: ["the author's detail"] }],
+              },
+            },
+          ],
+        },
+        [
+          {
+            id: 'c',
+            short: 'terse',
+            elaborate: { provenance: 'addition', inlines: ['an expansion with ', { id: 'd', short: 'more', elaborate: ['more'] }] },
+            derive: [{ provenance: 'compression', inlines: ['A step.'] }],
+          },
+        ],
+      ],
+    })
+
+    expect(levels(document)).toEqual([
+      'blocks[0]: compression',
+      'a.short: compression',
+      'a.elaborate: approved',
+      'b.short: compression',
+      'b.elaborate: approved',
+      'blocks[1]: approved',
+      'c.short: approved',
+      'c.elaborate: addition',
+      'd.short: addition',
+      'd.elaborate: addition',
+      'c.derive[0]: compression',
+    ])
+    expect(indexStretches(document).get('b')?.stretch.short).toEqual({ provenance: 'compression', text: 'a summary' })
+  })
+
+  it('makes Exemplify, Challenge and Reframe additions, along with every level inside them', () => {
+    const document = documentFrom({
+      title: 'T',
+      blocks: [
+        [
+          {
+            id: 'a',
+            short: 'a',
+            exemplify: [['An example with ', { id: 'b', short: 'a phrase', elaborate: ['a longer phrase'] }]],
+            challenge: [{ provenance: 'addition', inlines: ['An objection.'] }],
+            reframe: ['Another way to see it.'],
+          },
+        ],
+      ],
+    })
+
+    expect(levels(document)).toEqual([
+      'blocks[0]: approved',
+      'a.short: approved',
+      'a.exemplify[0]: addition',
+      'b.short: addition',
+      'b.elaborate: addition',
+      'a.challenge[0]: addition',
+      'a.reframe[0]: addition',
+    ])
+  })
+
+  it('names the path of every malformed mark', () => {
+    const parsed = parseDocument({
+      title: 'T',
+      blocks: [
+        { provenance: 'invented', inlines: ['x'] },
+        { inlines: ['x'] },
+        { provenance: 'approved', inlines: 'x', source: 'n' },
+        [{ id: 'a', short: { provenance: 'compression', text: ' ', tone: 'dry' }, elaborate: { provenance: 'approved' } }],
+        [{ id: 'b', short: 'b', ground: [{ note: 'n', quote: 'q', provenance: 'approved' }] }],
+      ],
+    })
+
+    expect(parsed).toEqual({
+      ok: false,
+      errors: [
+        'blocks[0].provenance: expected "approved", "compression" or "addition"',
+        'blocks[1].provenance: expected "approved", "compression" or "addition"',
+        'blocks[2].source: unknown field',
+        'blocks[2].inlines: expected an array of inlines',
+        'blocks[3][0].short.tone: unknown field',
+        'blocks[3][0].short.text: expected a non-empty string',
+        'blocks[3][0].elaborate.inlines: expected an array of inlines',
+        'blocks[4][0].ground[0].provenance: unknown field',
+      ],
+    })
+  })
+
+  it('reads the sample, which marks every provenance', () => {
+    const marks = levels(documentFrom(sample)).map((level) => level.split(': ')[1])
+
+    expect(new Set(marks)).toEqual(new Set(['approved', 'compression', 'addition']))
+  })
+
+  it('reports a stretch put where an array of inlines belongs as one error, not as a malformed mark', () => {
+    const stretch = { id: 'x', short: 'x', elaborate: ['x'] }
+
+    expect(
+      parseDocument({ title: 'T', blocks: [{ ...stretch, id: 'a' }, [{ id: 'b', short: 'b', elaborate: { ...stretch, id: 'c' }, derive: [{ ...stretch, id: 'd' }] }]] }),
+    ).toEqual({
+      ok: false,
+      errors: [
+        'blocks[0]: expected an array of inlines or { provenance, inlines }',
+        'blocks[1][0].elaborate: expected an array of inlines or { provenance, inlines }',
+        'blocks[1][0].derive[0]: expected a string, an array of inlines or { provenance, inlines }',
+      ],
+    })
+  })
+
+  it('rejects a mark other than addition inside an addition', () => {
+    const parsed = parseDocument({
+      title: 'T',
+      blocks: [
+        [
+          {
+            id: 'a',
+            short: 'a',
+            elaborate: {
+              provenance: 'addition',
+              inlines: ['an expansion with ', { id: 'b', short: { provenance: 'compression', text: 'b' }, elaborate: ['b'] }],
+            },
+            challenge: [
+              { provenance: 'approved', inlines: ['An objection.'] },
+              [{ id: 'c', short: 'c', elaborate: { provenance: 'compression', inlines: ['c'] } }],
+            ],
+          },
+        ],
+      ],
+    })
+
+    expect(parsed).toEqual({
+      ok: false,
+      errors: [
+        'blocks[0][0].elaborate.inlines[1].short.provenance: expected "addition" inside an addition',
+        'blocks[0][0].challenge[0].provenance: expected "addition" inside an addition',
+        'blocks[0][0].challenge[1][0].elaborate.provenance: expected "addition" inside an addition',
       ],
     })
   })
@@ -257,13 +472,13 @@ describe('available and count', () => {
   const stretch: Stretch = {
     kind: 'stretch',
     id: 'a',
-    short: 'a',
-    reframe: [{ inlines: [{ kind: 'text', text: 'r' }] }],
+    short: { provenance: 'approved', text: 'a' },
+    reframe: [{ provenance: 'addition', inlines: [{ kind: 'text', text: 'r' }] }],
     ground: [
       { note: 'n', quote: 'one' },
       { note: 'n', quote: 'two' },
     ],
-    elaborate: [{ kind: 'text', text: 'long' }],
+    elaborate: { provenance: 'approved', inlines: [{ kind: 'text', text: 'long' }] },
   }
 
   it('lists the operations a stretch has, in the fixed order', () => {
@@ -299,7 +514,7 @@ describe('indexStretches', () => {
       }),
     )
 
-    expect([...index].map(([id, { stretch, level }]) => [id, stretch.short, level])).toEqual([
+    expect([...index].map(([id, { stretch, level }]) => [id, stretch.short.text, level])).toEqual([
       ['a', 'a', 1],
       ['b', 'b', 2],
       ['c', 'c', 3],

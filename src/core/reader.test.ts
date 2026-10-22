@@ -114,7 +114,7 @@ describe('createReader', () => {
         id: 'idea',
         short: 'stretchtext',
         operation: 'challenge',
-        blocks: [{ inlines: [text('An objection.')], attachments: [] }],
+        blocks: [{ provenance: 'addition', inlines: [text('An objection.')], attachments: [] }],
       },
     ])
   })
@@ -182,6 +182,7 @@ describe('createReader', () => {
         operation: 'exemplify',
         blocks: [
           {
+            provenance: 'addition',
             inlines: [
               text('An example with '),
               { kind: 'phrase', id: 'deep', text: 'a source', chips: [{ kind: 'toggle', operation: 'ground', count: 1, pressed: true }] },
@@ -341,5 +342,94 @@ describe('the depth', () => {
     for (const depth of [-1, 3, 0.5, Number.NaN]) expect(reader.dispatch({ kind: 'depth', depth })).toBeUndefined()
     expect(reader.depth()).toEqual({ current: 0, deepest: 2 })
     expect(reader.view()).toEqual(createReader(rich).view())
+  })
+})
+
+describe('provenance', () => {
+  const marked = documentFrom({
+    title: 'T',
+    blocks: [
+      [
+        'The idea is ',
+        {
+          id: 'idea',
+          short: { provenance: 'compression', text: 'stretchtext' },
+          elaborate: ['stretchtext, from 1967'],
+          challenge: ['An objection.'],
+        },
+        '.',
+      ],
+      {
+        provenance: 'compression',
+        inlines: [
+          'A summary of ',
+          {
+            id: 'sum',
+            short: 'the detail',
+            elaborate: { provenance: 'approved', inlines: ["the detail, in the author's words"] },
+            derive: ['A step.'],
+          },
+          '.',
+        ],
+      },
+    ],
+  })
+
+  it('marks a level whose provenance differs from the text around it', () => {
+    expect(createReader(marked).view()).toEqual([
+      {
+        inlines: [text('The idea is '), { kind: 'phrase', id: 'idea', text: 'stretchtext', provenance: 'compression', chips: [] }, text('.')],
+        attachments: [],
+      },
+      {
+        provenance: 'compression',
+        inlines: [text('A summary of '), { kind: 'phrase', id: 'sum', text: 'the detail', chips: [] }, text('.')],
+        attachments: [],
+      },
+    ])
+  })
+
+  it('marks a long form against the text around it, and content beneath against the page', () => {
+    const reader = createReader(marked)
+    for (const id of ['idea', 'sum']) {
+      reader.dispatch({ kind: 'activate', id })
+      reader.dispatch({ kind: 'toggle', id, operation: 'elaborate' })
+    }
+    reader.dispatch({ kind: 'toggle', id: 'idea', operation: 'challenge' })
+    reader.dispatch({ kind: 'toggle', id: 'sum', operation: 'derive' })
+    const [idea, sum] = reader.view()
+
+    expect(idea?.inlines[1]).not.toHaveProperty('provenance')
+    expect(idea?.attachments).toMatchObject([{ operation: 'challenge', blocks: [{ provenance: 'addition', inlines: [text('An objection.')] }] }])
+    expect(sum?.inlines[1]).toMatchObject({ kind: 'long', id: 'sum', provenance: 'approved' })
+    expect(sum?.attachments).toMatchObject([{ operation: 'derive', blocks: [{ provenance: 'compression', inlines: [text('A step.')] }] }])
+  })
+
+  it('hides every mark while the reader has marking off, keeping the switch where it is', () => {
+    const reader = createReader(marked)
+    reader.dispatch({ kind: 'activate', id: 'idea' })
+    reader.dispatch({ kind: 'toggle', id: 'idea', operation: 'challenge' })
+    const shown = reader.view()
+
+    expect(reader.dispatch({ kind: 'provenance' })).toEqual({ focus: { kind: 'provenance' }, keepStill: true })
+    expect(reader.marking()).toEqual({ shown: false, needed: true })
+    expect(JSON.stringify(reader.view())).not.toContain('provenance')
+
+    reader.dispatch({ kind: 'provenance' })
+    expect(reader.marking()).toEqual({ shown: true, needed: true })
+    expect(reader.view()).toEqual(shown)
+  })
+
+  it('needs marking only when the document has text other than approved', () => {
+    const approved = documentFrom({
+      title: 'T',
+      blocks: [['A ', { id: 'a', short: 'phrase', elaborate: ['longer phrase'], derive: ['A step.'], ground: [elastic] }]],
+    })
+    const withShort = (short: unknown) => documentFrom({ title: 'T', blocks: [[{ id: 'a', short, elaborate: ['a'] }]] })
+
+    expect(createReader(approved).marking()).toEqual({ shown: true, needed: false })
+    expect(createReader(withShort({ provenance: 'compression', text: 'a' })).marking().needed).toBe(true)
+    expect(createReader(marked).marking().needed).toBe(true)
+    expect(createReader(rich).marking().needed).toBe(true)
   })
 })
