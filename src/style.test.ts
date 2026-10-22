@@ -31,6 +31,13 @@ describe('the stylesheet', () => {
     expect(rule).toContain('display: inline;')
   })
 
+  it('hides quiet buttons by clipping them, which keeps them in the tab order and the accessibility tree', () => {
+    const rule = /> \.chips\.quiet[^{]*{([^}]*)}/.exec(css)?.[1]
+
+    expect(rule).toContain('clip-path: inset(50%);')
+    expect(rule).not.toMatch(/display:\s*none|visibility:\s*hidden/)
+  })
+
   const text = ['text', 'compression', 'addition']
   const backgrounds = ['background', 'open-1', 'open-2', 'attachment']
 

@@ -48,6 +48,8 @@ export function mount(container: HTMLElement, elastic: ElasticDocument): void {
   container.addEventListener('click', (event) => {
     if (event.detail > 1 && clickActed) return
     clickActed = !endsSelectionAcross(event.target) && dispatchAt(event.target, true)
+    // Focus inside opened text shows its buttons, which is how a touch screen, without hover, reaches them.
+    if (!isControl(event.target)) openedTextAt(event.target)?.focus({ preventScroll: true })
   })
   container.addEventListener('keydown', (event) => {
     if (event.key !== 'Enter' && event.key !== ' ') return
@@ -75,6 +77,11 @@ function intentOf(control: HTMLElement | null): Intent | undefined {
 /** A held key repeats; only its first press acts, but none may scroll the page. */
 function isControl(target: EventTarget | null): boolean {
   return controlAt(target) !== null
+}
+
+/** The innermost elaborated text around the target. */
+function openedTextAt(target: EventTarget | null): HTMLElement | null {
+  return target instanceof Element ? target.closest<HTMLElement>('.stretch.open') : null
 }
 
 /** The click that ends a drag-select across a control is the reader selecting text, not acting. */
@@ -216,10 +223,13 @@ function renderInline(inline: ViewInline, depth: number): Node[] {
   long.tabIndex = -1
   long.setAttribute('role', 'group')
   long.setAttribute('aria-label', `Expanded: ${inline.short}`)
+  const buttons = chipRow(inline.id, inline.short, inline.chips)
+  // The stylesheet keeps these out of sight until the reader attends to the phrase.
+  buttons.classList.add('quiet')
   long.append(
     ...marks(long, inline.provenance),
     ...inline.inlines.flatMap((child) => renderInline(child, depth + 1)),
-    chipRow(inline.id, inline.short, inline.chips),
+    buttons,
   )
   return [long]
 }

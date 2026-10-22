@@ -183,13 +183,9 @@ h1 {
   vertical-align: 0.2em;
 }
 
-.chips {
-  margin-left: 0.3em;
-}
-
 .chip {
   display: inline-block;
-  margin-right: 0.25em;
+  margin-left: 0.25em;
   border-radius: 1em;
   cursor: pointer;
   white-space: nowrap;
@@ -211,13 +207,26 @@ h1 {
   color: var(--background);
 }
 
-.chips .collapse {
-  margin-left: 0;
-  margin-right: 0.25em;
-}
-
-.chips > :last-child {
-  margin-right: 0;
+/*
+ * An elaborated phrase keeps its buttons out of sight, though not out of the
+ * tab order or the accessibility tree, until the reader attends to it: the
+ * pointer is over it or focus is inside it, and not in a phrase opened inside
+ * it. Pressed buttons for content open beneath stay, so the reader can see
+ * what is open. Each button brings its own space before it, so a row out of
+ * sight leaves no gap. A browser without :has() drops the rule and shows
+ * every button.
+ */
+.stretch.open:not(:hover:not(:has(.stretch.open:hover)), :focus-within:not(:has(.stretch.open:focus-within)))
+  > .chips.quiet
+  > :not(.chip[aria-pressed='true']:not([data-operation='elaborate'])) {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  /* Hiding waits a moment, so the pointer can cross the gap between lines to a row that wrapped. */
+  transition: all 0s 0.4s allow-discrete;
 }
 
 .attachment {

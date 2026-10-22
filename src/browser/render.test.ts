@@ -110,6 +110,35 @@ describe('mount', () => {
     expect(firstParagraph(container)).toBe('A document the reader stretches and shrinks.')
   })
 
+  it('focuses the innermost open stretch when its text is clicked, so a touch screen can show its buttons', () => {
+    control(container, 'outer').click()
+    control(container, 'inner').click()
+    ;(document.activeElement as HTMLElement).blur()
+    stretch(container, 'inner').click()
+
+    expect(document.activeElement).toBe(stretch(container, 'inner'))
+  })
+
+  it('quiets only an elaborated phrase’s own buttons, not those of a closed phrase inside it', () => {
+    const container = document.createElement('div')
+    mount(
+      container,
+      documentFrom({
+        title: 'T',
+        blocks: [
+          [{ id: 'outer', short: 'outer', elaborate: ['outer ', { id: 'inner', short: 'inner', elaborate: ['inner'], challenge: ['c'] }] }],
+        ],
+      }),
+    )
+    control(container, 'outer').click()
+    control(container, 'inner').click()
+
+    expect([...container.querySelectorAll('.chips')].map((row) => [row.id, row.classList.contains('quiet')])).toEqual([
+      [elementId.chips('inner'), false],
+      [elementId.chips('outer'), true],
+    ])
+  })
+
   it('expands a nested stretch without collapsing its parent', () => {
     control(container, 'outer').click()
     control(container, 'inner').click()
@@ -149,6 +178,20 @@ describe('mount', () => {
     control(container, 'outer').click()
 
     expect(firstParagraph(container)).toBe('A document the reader stretches.')
+    getSelection()?.removeAllRanges()
+  })
+
+  it('leaves focus on a control inside opened text when the click ends a selection across it', () => {
+    control(container, 'outer').click()
+    const inner = control(container, 'inner')
+    inner.focus()
+    const range = document.createRange()
+    range.selectNodeContents(inner)
+    select(range)
+
+    inner.click()
+
+    expect(document.activeElement).toBe(inner)
     getSelection()?.removeAllRanges()
   })
 
