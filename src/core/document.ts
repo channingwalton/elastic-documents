@@ -207,17 +207,26 @@ export function count(stretch: Stretch, operation: Operation): number | undefine
   return operation === 'elaborate' ? undefined : stretch[operation]?.length
 }
 
-/** Every stretch in the document, wherever it is nested, by id. */
-export function stretchesById(document: ElasticDocument): ReadonlyMap<string, Stretch> {
-  const found = new Map<string, Stretch>()
-  const visit = (inlines: readonly Inline[]): void => {
+/** A stretch and its level: 1 in a paragraph, 2 inside the long form of a level-1 stretch, and so on. */
+export interface IndexedStretch {
+  readonly stretch: Stretch
+  readonly level: number
+}
+
+/**
+ * Every stretch in the document, wherever it is nested, by id. Levels count
+ * Elaborate only, so each paragraph opened beneath a phrase starts again at 1.
+ */
+export function indexStretches(document: ElasticDocument): ReadonlyMap<string, IndexedStretch> {
+  const found = new Map<string, IndexedStretch>()
+  const visit = (inlines: readonly Inline[], level: number): void => {
     for (const inline of inlines) {
       if (inline.kind === 'text') continue
-      found.set(inline.id, inline)
-      visit(inline.elaborate ?? [])
-      for (const operation of listOperations) for (const block of inline[operation] ?? []) visit(block.inlines)
+      found.set(inline.id, { stretch: inline, level })
+      visit(inline.elaborate ?? [], level + 1)
+      for (const operation of listOperations) for (const block of inline[operation] ?? []) visit(block.inlines, 1)
     }
   }
-  for (const block of document.blocks) visit(block.inlines)
+  for (const block of document.blocks) visit(block.inlines, 1)
   return found
 }

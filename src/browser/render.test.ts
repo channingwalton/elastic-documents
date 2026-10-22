@@ -542,6 +542,72 @@ describe('mount with several operations', () => {
   })
 })
 
+describe('the depth control', () => {
+  let container: HTMLElement
+
+  beforeEach(() => {
+    container = document.createElement('div')
+    document.body.replaceChildren(container)
+    mount(container, nested)
+  })
+
+  function depthButton(depth: number): HTMLElement {
+    const element = byId(container, elementId.depth(depth))
+    if (!element) throw new Error(`no depth button ${depth}`)
+    return element
+  }
+
+  function pressedDepths(): (string | null)[][] {
+    return [...container.querySelectorAll('.depth [data-depth]')].map((b) => [b.textContent, b.getAttribute('aria-pressed')])
+  }
+
+  it('offers each depth from 0 to the deepest beneath the title, with 0 pressed', () => {
+    const group = container.querySelector('h1')?.nextElementSibling
+    expect(group?.getAttribute('role')).toBe('group')
+    expect(group?.getAttribute('aria-label')).toBe('Depth')
+    expect(pressedDepths()).toEqual([
+      ['0', 'true'],
+      ['1', 'false'],
+      ['2', 'false'],
+    ])
+    expect([0, 1, 2].map((depth) => depthButton(depth).title)).toEqual([
+      'Show the short forms',
+      'Open phrases 1 level deep',
+      'Open phrases 2 levels deep',
+    ])
+  })
+
+  it('opens every phrase to the depth clicked, keeping focus on its button and the page still', () => {
+    const focus = vi.spyOn(HTMLElement.prototype, 'focus')
+    try {
+      depthButton(2).click()
+
+      expect(firstParagraph(container)).toBe('A document the reader stretches and shrinks in place.')
+      expect(pressedDepths().map(([, pressed]) => pressed)).toEqual(['false', 'false', 'true'])
+      expect(document.activeElement).toBe(depthButton(2))
+      expect(focus.mock.lastCall?.[0]).toEqual({ preventScroll: true })
+    } finally {
+      focus.mockRestore()
+    }
+  })
+
+  it('sets the depth from the keyboard', () => {
+    expect(press(depthButton(1), 'Enter').defaultPrevented).toBe(true)
+    expect(firstParagraph(container)).toBe('A document the reader stretches and shrinks.')
+    expect(document.activeElement).toBe(depthButton(1))
+
+    expect(press(depthButton(0), ' ').defaultPrevented).toBe(true)
+    expect(firstParagraph(container)).toBe('A document the reader stretches.')
+  })
+
+  it('shows no depth control when nothing in the document elaborates', () => {
+    const plain = document.createElement('div')
+    mount(plain, documentFrom({ title: 'T', blocks: [[{ id: 'a', short: 'a', ground: [{ note: 'n', quote: 'q' }] }]] }))
+
+    expect(plain.querySelector('.depth')).toBeNull()
+  })
+})
+
 describe('showErrors', () => {
   it('lists each parse error', () => {
     const container = document.createElement('div')

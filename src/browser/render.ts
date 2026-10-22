@@ -1,12 +1,12 @@
 import { isOperation, operationInfo, type ElasticDocument, type Operation, type Passage } from '../core/document'
-import { createReader, type FocusTarget, type Intent } from '../core/reader'
+import { createReader, type Depth, type FocusTarget, type Intent } from '../core/reader'
 import type { Chip, ViewAttachment, ViewBlock, ViewInline } from '../core/view'
 
 /**
  * Draws the document into the container and forwards the reader's clicks and
  * keys to the core as intents. A closed phrase is a control; its operation
  * buttons sit beside it and an elaborated phrase ends with them, so no control
- * ever sits inside another.
+ * ever sits inside another. The depth control sits beneath the title.
  */
 export function mount(container: HTMLElement, elastic: ElasticDocument): void {
   const reader = createReader(elastic)
@@ -15,7 +15,7 @@ export function mount(container: HTMLElement, elastic: ElasticDocument): void {
   let clickActed = false
 
   const draw = (): void => {
-    container.replaceChildren(element('h1', elastic.title), ...reader.view().flatMap(renderBlock))
+    container.replaceChildren(element('h1', elastic.title), ...depthControl(reader.depth()), ...reader.view().flatMap(renderBlock))
   }
 
   const dispatchAt = (target: EventTarget | null, byClick: boolean): boolean => {
@@ -43,13 +43,14 @@ export function mount(container: HTMLElement, elastic: ElasticDocument): void {
 }
 
 function controlAt(target: EventTarget | null): HTMLElement | null {
-  return target instanceof Element ? target.closest<HTMLElement>('[data-activate], [data-toggle]') : null
+  return target instanceof Element ? target.closest<HTMLElement>('[data-activate], [data-toggle], [data-depth]') : null
 }
 
 function intentOf(control: HTMLElement | null): Intent | undefined {
-  const { activate, toggle, operation } = control?.dataset ?? {}
+  const { activate, toggle, operation, depth } = control?.dataset ?? {}
   if (activate !== undefined) return { kind: 'activate', id: activate }
   if (toggle !== undefined && isOperation(operation)) return { kind: 'toggle', id: toggle, operation }
+  if (depth !== undefined) return { kind: 'depth', depth: Number(depth) }
   return undefined
 }
 
@@ -79,6 +80,8 @@ function findFocusTarget(container: HTMLElement, focus: FocusTarget): HTMLElemen
       return byId(elementId.revealed(focus.id, focus.operation))
     case 'chip':
       return byId(elementId.chip(focus.id, focus.operation))
+    case 'depth':
+      return byId(elementId.depth(focus.depth))
   }
 }
 
@@ -86,6 +89,28 @@ export function showErrors(container: HTMLElement, errors: readonly string[]): v
   const list = document.createElement('ul')
   list.append(...errors.map((error) => element('li', error)))
   container.replaceChildren(element('h1', 'This document has errors'), list)
+}
+
+/** A button for each depth, from the short forms down to the deepest Elaborate; none if nothing elaborates. */
+function depthControl({ current, deepest }: Depth): HTMLElement[] {
+  if (deepest === 0) return []
+  const group = document.createElement('div')
+  group.className = 'depth'
+  group.setAttribute('role', 'group')
+  group.setAttribute('aria-label', 'Depth')
+  const label = element('span', 'Depth', 'depth-label')
+  label.setAttribute('aria-hidden', 'true')
+  const buttons = Array.from({ length: deepest + 1 }, (_, depth) => {
+    const button = element('span', String(depth))
+    button.id = elementId.depth(depth)
+    button.dataset.depth = String(depth)
+    button.title = depth === 0 ? 'Show the short forms' : `Open phrases ${depth} ${depth === 1 ? 'level' : 'levels'} deep`
+    makeControl(button)
+    button.setAttribute('aria-pressed', String(depth === current))
+    return button
+  })
+  group.append(label, ...buttons)
+  return [group]
 }
 
 /** A block is a paragraph followed by the content its phrases have opened beneath it. */
@@ -220,6 +245,7 @@ export const elementId = {
   chip: (id: string, operation: Operation): string => `elastic-chip-${operation}-${id}`,
   /** The elaborated text for Elaborate; the content opened beneath for the others. */
   revealed: (id: string, operation: Operation): string => `elastic-${operation}-${id}`,
+  depth: (depth: number): string => `elastic-depth-${depth}`,
 }
 
 function makeControl(control: HTMLElement): void {

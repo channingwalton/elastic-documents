@@ -42,6 +42,37 @@ h1 {
   line-height: 1.25;
 }
 
+.depth {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35em;
+  align-items: center;
+  margin: -0.4rem 0 1.4rem;
+  color: var(--control);
+  font: 0.8rem/1 system-ui, sans-serif;
+}
+
+.depth-label {
+  margin-right: 0.3em;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.depth [data-depth] {
+  min-width: 1ch;
+  padding: 0.3em 0.65em;
+  border: 1px solid var(--control);
+  border-radius: 1em;
+  cursor: pointer;
+  text-align: center;
+}
+
+.depth [aria-pressed='true'] {
+  background: var(--control);
+  color: var(--background);
+}
+
 .stretch {
   cursor: pointer;
   border-bottom: 1px dotted var(--stretch-line);
@@ -182,6 +213,7 @@ h1 {
 }
 
 .stretch:focus-visible,
+.depth [data-depth]:focus-visible,
 .collapse:focus-visible,
 .chip:focus-visible,
 .close:focus-visible,

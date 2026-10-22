@@ -215,3 +215,131 @@ describe('createReader', () => {
     expect(reader.view()).toEqual(createReader(rich).view())
   })
 })
+
+describe('the depth', () => {
+  const opened = (id: string, short: string, inlines: unknown[], chips: unknown[]) => ({ kind: 'long', id, short, inlines, chips })
+  const ideaChips = (ground = false) => [
+    { kind: 'toggle', operation: 'elaborate', pressed: true },
+    { kind: 'toggle', operation: 'ground', count: 2, pressed: ground },
+    { kind: 'toggle', operation: 'challenge', count: 1, pressed: false },
+  ]
+  const closedPhrase = (id: string, short: string) => ({ kind: 'phrase', id, text: short, chips: [] })
+
+  it('starts at 0, and goes as deep as the deepest Elaborate', () => {
+    expect(createReader(rich).depth()).toEqual({ current: 0, deepest: 2 })
+    expect(createReader(documentFrom({ title: 'T', blocks: [[{ id: 'a', short: 'a', ground: [elastic] }]] })).depth()).toEqual({
+      current: 0,
+      deepest: 0,
+    })
+  })
+
+  it('opens every Elaborate down to the depth, keeping the depth control where it is', () => {
+    const reader = createReader(rich)
+
+    expect(reader.dispatch({ kind: 'depth', depth: 1 })).toEqual({ focus: { kind: 'depth', depth: 1 }, keepStill: true })
+    expect(reader.depth()).toEqual({ current: 1, deepest: 2 })
+    const [idea, more] = reader.view()
+    expect(idea?.inlines[1]).toEqual(opened('idea', 'stretchtext', [text('stretchtext, from 1967')], ideaChips()))
+    expect(more?.inlines[1]).toEqual(opened('more', 'more', [text('more '), closedPhrase('inner', 'detail')], [{ kind: 'collapse' }]))
+
+    reader.dispatch({ kind: 'depth', depth: 2 })
+    expect(reader.view()[1]?.inlines[1]).toEqual(
+      opened('more', 'more', [text('more '), opened('inner', 'detail', [text('detail inside')], [{ kind: 'collapse' }])], [
+        { kind: 'collapse' },
+      ]),
+    )
+
+    reader.dispatch({ kind: 'depth', depth: 0 })
+    expect(reader.view()).toEqual(createReader(rich).view())
+  })
+
+  it('keeps what the reader opens and closes by hand until a depth is chosen again, which resets it', () => {
+    const reader = createReader(rich)
+    reader.dispatch({ kind: 'activate', id: 'more' })
+    reader.dispatch({ kind: 'depth', depth: 1 })
+    reader.dispatch({ kind: 'toggle', id: 'more', operation: 'elaborate' })
+    reader.dispatch({ kind: 'activate', id: 'idea' })
+    expect(reader.view()[0]?.inlines[1]).toEqual(closedPhrase('idea', 'stretchtext'))
+    expect(reader.view()[1]?.inlines[1]).toEqual(closedPhrase('more', 'more'))
+    expect(reader.depth()).toEqual({ current: 1, deepest: 2 })
+
+    reader.dispatch({ kind: 'depth', depth: 1 })
+    expect(reader.view()[0]?.inlines[1]).toMatchObject({ kind: 'long', id: 'idea' })
+    expect(reader.view()[1]?.inlines[1]).toMatchObject({ kind: 'long', id: 'more' })
+
+    reader.dispatch({ kind: 'activate', id: 'inner' })
+    reader.dispatch({ kind: 'depth', depth: 0 })
+    expect(reader.view()).toEqual(createReader(rich).view())
+    reader.dispatch({ kind: 'activate', id: 'more' })
+    expect(reader.view()[1]?.inlines[1]).toMatchObject({ kind: 'long', inlines: [text('more '), closedPhrase('inner', 'detail')] })
+  })
+
+  it('changes only Elaborate, leaving the other operations and the buttons shown as the reader set them', () => {
+    const reader = createReader(rich)
+    reader.dispatch({ kind: 'activate', id: 'idea' })
+    reader.dispatch({ kind: 'toggle', id: 'idea', operation: 'ground' })
+
+    reader.dispatch({ kind: 'depth', depth: 1 })
+    expect(reader.view()[0]?.inlines[1]).toEqual(opened('idea', 'stretchtext', [text('stretchtext, from 1967')], ideaChips(true)))
+
+    reader.dispatch({ kind: 'toggle', id: 'idea', operation: 'ground' })
+    reader.dispatch({ kind: 'depth', depth: 0 })
+    expect(reader.view()[0]?.inlines[1]).toEqual({
+      kind: 'phrase',
+      id: 'idea',
+      text: 'stretchtext',
+      chips: ideaChips().map((chip) => ({ ...chip, pressed: false })),
+    })
+    expect(reader.view()[0]?.attachments).toEqual([])
+  })
+
+  it('applies the depth afresh in each paragraph opened beneath a phrase, whether opened before or after', () => {
+    const exemplified = documentFrom({
+      title: 'T',
+      blocks: [[{ id: 'a', short: 'a', exemplify: [[{ id: 'b', short: 'b', elaborate: ['b inside'] }]] }]],
+    })
+    const expected = {
+      operation: 'exemplify',
+      blocks: [{ inlines: [opened('b', 'b', [text('b inside')], [{ kind: 'collapse' }])] }],
+    }
+
+    const before = createReader(exemplified)
+    expect(before.depth()).toEqual({ current: 0, deepest: 1 })
+    before.dispatch({ kind: 'activate', id: 'a' })
+    before.dispatch({ kind: 'depth', depth: 1 })
+    expect(before.view()[0]?.attachments[0]).toMatchObject(expected)
+
+    const after = createReader(exemplified)
+    after.dispatch({ kind: 'depth', depth: 1 })
+    after.dispatch({ kind: 'activate', id: 'a' })
+    expect(after.view()[0]?.attachments[0]).toMatchObject(expected)
+  })
+
+  it('opens the phrases inside a long form the reader closed, so they show at the depth when it reopens', () => {
+    const reader = createReader(rich)
+    const bothOpen = { kind: 'long', inlines: [text('more '), { kind: 'long', id: 'inner' }] }
+    reader.dispatch({ kind: 'depth', depth: 1 })
+    reader.dispatch({ kind: 'toggle', id: 'more', operation: 'elaborate' })
+    reader.dispatch({ kind: 'depth', depth: 2 })
+    expect(reader.view()[1]?.inlines[1]).toMatchObject(bothOpen)
+
+    reader.dispatch({ kind: 'toggle', id: 'more', operation: 'elaborate' })
+    expect(reader.view()[1]?.inlines[1]).toEqual(closedPhrase('more', 'more'))
+    reader.dispatch({ kind: 'activate', id: 'more' })
+    expect(reader.view()[1]?.inlines[1]).toMatchObject(bothOpen)
+  })
+
+  it('finds the deepest Elaborate in a document with very many phrases', () => {
+    const many = Array.from({ length: 150_000 }, (_, i) => ({ id: `s${i}`, short: 's', elaborate: ['s'] }))
+
+    expect(createReader(documentFrom({ title: 'T', blocks: [many] })).depth()).toEqual({ current: 0, deepest: 1 })
+  })
+
+  it('ignores a depth the document does not have', () => {
+    const reader = createReader(rich)
+
+    for (const depth of [-1, 3, 0.5, Number.NaN]) expect(reader.dispatch({ kind: 'depth', depth })).toBeUndefined()
+    expect(reader.depth()).toEqual({ current: 0, deepest: 2 })
+    expect(reader.view()).toEqual(createReader(rich).view())
+  })
+})

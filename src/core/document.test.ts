@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { available, count, parseDocument, type Stretch } from './document'
+import { available, count, indexStretches, parseDocument, type Stretch } from './document'
+import { documentFrom } from './testing'
 
 describe('parseDocument', () => {
   it('reads strings as text and objects as stretches, at any depth', () => {
@@ -275,6 +276,35 @@ describe('available and count', () => {
       2,
       1,
       undefined,
+    ])
+  })
+})
+
+describe('indexStretches', () => {
+  it('finds every stretch by id with its level, which starts again at 1 in each paragraph opened beneath', () => {
+    const index = indexStretches(
+      documentFrom({
+        title: 'T',
+        blocks: [
+          [
+            {
+              id: 'a',
+              short: 'a',
+              elaborate: ['a ', { id: 'b', short: 'b', elaborate: ['b ', { id: 'c', short: 'c', elaborate: ['c'] }] }],
+              exemplify: [[{ id: 'd', short: 'd', elaborate: ['d'] }]],
+            },
+          ],
+          [{ id: 'e', short: 'e', ground: [{ note: 'n', quote: 'q' }] }],
+        ],
+      }),
+    )
+
+    expect([...index].map(([id, { stretch, level }]) => [id, stretch.short, level])).toEqual([
+      ['a', 'a', 1],
+      ['b', 'b', 2],
+      ['c', 'c', 3],
+      ['d', 'd', 1],
+      ['e', 'e', 1],
     ])
   })
 })

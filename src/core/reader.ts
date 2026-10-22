@@ -1,15 +1,19 @@
-import { available, stretchesById, type ElasticDocument, type Operation, type Stretch } from './document'
+import { available, indexStretches, type ElasticDocument, type IndexedStretch, type Operation, type Stretch } from './document'
 import { emptyState, openOperations, showsChips, type ReaderState } from './state'
 import { view, type ViewBlock } from './view'
 
-/** What the reader asked for: to activate a phrase, or to toggle one of its operations. */
+/** What the reader asked for: to activate a phrase, to toggle one of its operations, or to open the document to a depth. */
 export type Intent =
   | { readonly kind: 'activate'; readonly id: string }
   | { readonly kind: 'toggle'; readonly id: string; readonly operation: Operation }
+  | { readonly kind: 'depth'; readonly depth: number }
+
+type PhraseIntent = Exclude<Intent, { readonly kind: 'depth' }>
 
 export type FocusTarget =
   | { readonly kind: 'phrase' | 'long'; readonly id: string }
   | { readonly kind: 'chip' | 'attachment'; readonly id: string; readonly operation: Operation }
+  | { readonly kind: 'depth'; readonly depth: number }
 
 /**
  * Where focus goes after an intent, and whether a click should leave the page
@@ -21,22 +25,37 @@ export interface Effect {
   readonly keepStill: boolean
 }
 
+/** The depth the document is open to, and the deepest it can go. */
+export interface Depth {
+  readonly current: number
+  readonly deepest: number
+}
+
 export interface Reader {
   readonly view: () => ViewBlock[]
+  readonly depth: () => Depth
   readonly dispatch: (intent: Intent) => Effect | undefined
 }
 
 export function createReader(document: ElasticDocument): Reader {
-  const stretches = stretchesById(document)
+  const stretches = indexStretches(document)
+  let deepest = 0
+  for (const { stretch, level } of stretches.values()) if (stretch.elaborate) deepest = Math.max(deepest, level)
   let state = emptyState
+
+  const transition = (intent: Intent): Transition | undefined => {
+    if (intent.kind === 'depth') return deepen(stretches, deepest, state, intent.depth)
+    const indexed = stretches.get(intent.id)
+    return indexed && apply(indexed.stretch, state, intent)
+  }
 
   return {
     view: () => view(document, state),
+    depth: () => ({ current: state.depth, deepest }),
     dispatch: (intent) => {
-      const stretch = stretches.get(intent.id)
-      const transition = stretch && apply(stretch, state, intent)
-      if (transition) state = transition.state
-      return transition?.effect
+      const next = transition(intent)
+      if (next) state = next.state
+      return next?.effect
     },
   }
 }
@@ -50,7 +69,7 @@ interface Transition {
  * Activating a closed phrase opens its only operation, or shows its buttons
  * when it has several. Activating a phrase with anything open closes it all.
  */
-function apply(stretch: Stretch, state: ReaderState, intent: Intent): Transition | undefined {
+function apply(stretch: Stretch, state: ReaderState, intent: PhraseIntent): Transition | undefined {
   const { id } = stretch
   const operations = available(stretch)
 
@@ -92,11 +111,37 @@ function close(state: ReaderState, id: string, operation: Operation): Transition
   }
 }
 
+/**
+ * Opens every Elaborate down to the depth and closes those below it, replacing
+ * whatever the reader opened or closed by hand. Other operations stay as they are.
+ */
+function deepen(
+  stretches: ReadonlyMap<string, IndexedStretch>,
+  deepest: number,
+  state: ReaderState,
+  depth: number,
+): Transition | undefined {
+  if (!Number.isInteger(depth) || depth < 0 || depth > deepest) return undefined
+  const open = new Map(state.open)
+  for (const { stretch, level } of stretches.values()) {
+    if (stretch.elaborate === undefined) continue
+    const operations = new Set(openOperations(state, stretch.id))
+    if (level <= depth) operations.add('elaborate')
+    else operations.delete('elaborate')
+    put(open, stretch.id, operations)
+  }
+  return { state: { ...state, open, depth }, effect: { focus: { kind: 'depth', depth }, keepStill: true } }
+}
+
 function withOpen(state: ReaderState, id: string, operations: ReadonlySet<Operation>): ReaderState {
   const open = new Map(state.open)
+  put(open, id, operations)
+  return { ...state, open }
+}
+
+function put(open: Map<string, ReadonlySet<Operation>>, id: string, operations: ReadonlySet<Operation>): void {
   if (operations.size > 0) open.set(id, operations)
   else open.delete(id)
-  return { ...state, open }
 }
 
 function withMenu(state: ReaderState, id: string, shown: boolean): ReaderState {
