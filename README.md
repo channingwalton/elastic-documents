@@ -71,7 +71,10 @@ npm install
 npm run dev     # the reader, at the URL Vite prints
 npm test        # Vitest
 npm run build   # a static build in dist/
+npm run export -- examples/sample.json   # one HTML file in exports/
 ```
+
+The export writes a document and the reader into a single HTML file that opens from disk, offline, with nothing to fetch, so a study reader needs only the file. It checks the document first and reports every error with its path. Give a second path to write somewhere else: `npm run export -- doc.json out.html`. The dev server and `npm run build` show [`examples/sample.json`](examples/sample.json), which `package.json` maps to `#document`.
 
 ## Document format
 
@@ -143,6 +146,7 @@ flowchart LR
 - `src/core/state.ts` and `src/core/reader.ts` hold what is open and decide what each intent does, including where focus goes.
 - `src/core/view.ts` turns the document and state into what the reader sees, including where provenance changes.
 - `src/browser/render.ts` draws the view and handles clicks and keys.
+- `src/export/build.ts` builds the reader with a given document in place of the sample, and `src/export/inline.ts` writes the script and stylesheet into the page. `scripts/export.ts` is the command.
 
 ## Next ideas
 
@@ -150,7 +154,6 @@ flowchart LR
 - **Fisheye prerequisites**: opening a claim also brings in the claims it depends on.
 - **Orientation**: an outline, and the open state in the URL.
 - **Study conditions**: six operations against one, provenance shown or hidden, and a downloadable event log.
-- **Single-file export** of a document and its reader.
 - **A first real document** built from a vault note, with an error planted in generated text.
 
 ## Licence

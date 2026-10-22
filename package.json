@@ -3,12 +3,17 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "imports": {
+    "#document": "./examples/sample.json"
+  },
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "export": "node scripts/export.ts",
     "test": "vitest run"
   },
   "devDependencies": {
+    "@types/node": "^26.6.5",
     "jsdom": "^30.1.3",
     "typescript": "^7.0.2",
     "vite": "^8.3.5",
