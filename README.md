@@ -57,6 +57,7 @@ The questions the spike should help answer:
 - **Depth control.** A row of buttons beneath the title opens the whole document to a depth, a cheap form of semantic zooming (Engelbart's level clipping). Depth 0 shows the short forms; depth N opens every Elaborate from level 1 down to N. Levels start again at 1 inside content opened beneath a phrase. Choosing a depth resets whatever the reader opened or closed by hand. A depth is pressed only while every Elaborate is open exactly to it, counting those inside closed content, so no depth is pressed once the page has drifted.
 - **Provenance marking.** Every paragraph, short form and long form is approved (written or approved by the author), an AI compression of approved text, or an AI addition. The author's words keep the body face. AI text takes a sans face and its own colour: upright for a compression, italic for an addition. A mark (✓, ≈ or ✦), which screen readers announce, names the provenance at the start of each level that differs from the text around it. Nothing marks where the text returns to the provenance around it, though the face and colour change back. A legend beside the Provenance switch explains the marks, and the switch hides them all.
 - **Test documents.** A document with planted errors opens with a banner, which nothing closes, saying how many of its statements are deliberately false. Its Show which button lists each one, what is wrong with it, and what the generator wrote there.
+- **Study conditions and sessions.** Parameters in the page's address set a study's conditions and log a reader's session; see [Running a study](#running-a-study).
 - **Keyboard and screen reader support.** Every control is focusable, focus follows what opens and closes, and controls name what they reveal.
 
 It currently shows a hand-written sample, [`examples/sample.json`](examples/sample.json).
@@ -114,6 +115,24 @@ npm run export -- examples/sample.json   # one HTML file in exports/
 ```
 
 The export writes a document and the reader into a single HTML file that opens from disk, offline, with nothing to fetch, so a study reader needs only the file. It checks the document first and reports every error with its path. Give a second path to write somewhere else: `npm run export -- doc.json out.html`. The dev server and `npm run build` show [`examples/sample.json`](examples/sample.json), which `package.json` maps to `#document`.
+
+## Running a study
+
+One build, or one exported file, runs every condition of a study. Parameters in its address choose them:
+
+| Parameter | Values | Effect |
+|---|---|---|
+| `operations` | `all` (default), `elaborate` | `elaborate` leaves Elaborate as the only control, a single "more detail" control for study question 1. A phrase with nothing else to open stays marked, but is not a control. |
+| `provenance` | `switchable` (default), `shown`, `hidden` | `shown` and `hidden` fix the marking for study question 4, and remove the Provenance switch so a reader cannot change their condition. The legend stays while the marks show. |
+| `session` | letters, digits, `-` and `_` | Starts a study session for the named reader. |
+
+For example, `study.html?session=reader-B&operations=elaborate&provenance=hidden`. Any other parameter or value, or one given twice, shows "This link has errors" instead of the document, so a typo cannot put a reader in the wrong condition.
+
+In a session:
+
+- The page logs each thing the reader does that it acts on, with the time and the operations it opened or closed. Those include changes inside content the reader cannot see, such as an Elaborate inside a closed Challenge; replaying the logged intents from the start gives exactly what was on the page.
+- A Download log button saves the log as JSON, named for the reader and when the session started, with the reader, the conditions and the document's title. The log lives only in the page until it is saved, so a reload or a closed tab loses it.
+- A test document's banner reads "Study document. Some AI text in it is wrong on purpose; you'll be shown which at the end.", with no count and no Show which. Opening the same file without `session` is the debrief: the full banner, with Show which.
 
 ## Document format
 
@@ -199,7 +218,8 @@ flowchart LR
 ```
 
 - `src/core/document.ts` parses and validates documents, and writes them back as JSON.
-- `src/core/state.ts` and `src/core/reader.ts` hold what is open and decide what each intent does, including where focus goes.
+- `src/core/conditions.ts` reads a study's conditions and session from the page's address.
+- `src/core/state.ts` and `src/core/reader.ts` hold what is open and decide what each intent does, including where focus goes, and keep a session's log.
 - `src/core/view.ts` turns the document and state into what the reader sees, including where provenance changes.
 - `src/browser/render.ts` draws the view and handles clicks and keys.
 - `src/export/build.ts` builds the reader with a given document in place of the sample, and `src/export/inline.ts` writes the script and stylesheet into the page. `scripts/export.ts` is the command.
@@ -240,7 +260,6 @@ flowchart LR
 - **View filters**: "show only the assumptions" or "show only what the author said".
 - **Fisheye prerequisites**: opening a claim also brings in the claims it depends on.
 - **Orientation**: an outline, and the open state in the URL.
-- **Study conditions**: six operations against one, provenance shown or hidden, and a downloadable event log.
 - **A planted error**: an error in the generated text of a real document, for the first study.
 
 ## Licence

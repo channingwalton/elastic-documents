@@ -8,7 +8,8 @@ import {
   type Passage,
   type Provenance,
 } from '../core/document'
-import { createReader, type Depth, type FocusTarget, type Intent, type Marking, type Notice } from '../core/reader'
+import type { Conditions } from '../core/conditions'
+import { createReader, logFile, type Depth, type FocusTarget, type Intent, type Marking, type Notice, type SessionLog } from '../core/reader'
 import type { Chip, ViewAttachment, ViewBlock, ViewInline } from '../core/view'
 
 /**
@@ -16,10 +17,13 @@ import type { Chip, ViewAttachment, ViewBlock, ViewInline } from '../core/view'
  * keys to the core as intents. A closed phrase is a control; its operation
  * buttons sit beside it and an elaborated phrase ends with them, so no control
  * ever sits inside another. The depth control and the provenance switch sit
- * beneath the title, and a test document's banner above it.
+ * beneath the title, and a test document's banner above it. A study's
+ * conditions, if any, decide which operations and marks the reader gets, and
+ * in a study session a button beneath them saves the session's log.
  */
-export function mount(container: HTMLElement, elastic: ElasticDocument): void {
-  const reader = createReader(elastic)
+export function mount(container: HTMLElement, elastic: ElasticDocument, conditions?: Conditions): void {
+  const reader = createReader(elastic, conditions)
+  const inSession = reader.log() !== undefined
   // Once a click acts, the rest of that double- or triple-click lands on whatever the
   // redraw put under the pointer, so it neither acts nor selects a word.
   let clickActed = false
@@ -30,6 +34,7 @@ export function mount(container: HTMLElement, elastic: ElasticDocument): void {
       element('h1', elastic.title),
       ...depthControl(reader.depth()),
       ...provenanceControl(reader.marking()),
+      ...(inSession ? [downloadControl(reader.log)] : []),
       ...reader.view().flatMap(renderBlock),
     )
   }
@@ -55,7 +60,8 @@ export function mount(container: HTMLElement, elastic: ElasticDocument): void {
   container.addEventListener('keydown', (event) => {
     if (event.key !== 'Enter' && event.key !== ' ') return
     if (event.shiftKey || event.ctrlKey || event.metaKey || event.altKey) return
-    if (event.repeat ? isControl(event.target) : dispatchAt(event.target, false)) event.preventDefault()
+    // A held key on a real button would press it again at every repeat.
+    if (event.repeat ? isControl(event.target) || event.target instanceof HTMLButtonElement : dispatchAt(event.target, false)) event.preventDefault()
   })
   draw()
 }
@@ -116,19 +122,29 @@ function findFocusTarget(container: HTMLElement, focus: FocusTarget): HTMLElemen
   }
 }
 
-export function showErrors(container: HTMLElement, errors: readonly string[]): void {
+export function showErrors(container: HTMLElement, errors: readonly string[], heading = 'This document has errors'): void {
   const list = document.createElement('ul')
   list.append(...errors.map((error) => element('li', error)))
-  container.replaceChildren(element('h1', 'This document has errors'), list)
+  container.replaceChildren(element('h1', heading), list)
 }
 
 /**
  * Says a test document holds deliberately false statements, with nothing to
  * close it, and a control that shows which, what is wrong with each and what
- * the generator wrote there; none for any other document.
+ * the generator wrote there. In a study session it says only that some AI
+ * text is wrong on purpose, until the debrief. None for any other document.
  */
 function banner(notice: Notice | undefined): HTMLElement[] {
   if (notice === undefined) return []
+  const note = document.createElement('div')
+  note.className = 'test-notice'
+  note.setAttribute('role', 'note')
+  if (notice.study) {
+    const message = document.createElement('p')
+    message.append(element('strong', 'Study document.'), ' Some AI text in it is wrong on purpose; you’ll be shown which at the end.')
+    note.append(message)
+    return [note]
+  }
   const { planted, revealed } = notice
   const message = document.createElement('p')
   message.append(
@@ -140,9 +156,6 @@ function banner(notice: Notice | undefined): HTMLElement[] {
   reveal.dataset.reveal = ''
   makeControl(reveal)
   reveal.setAttribute('aria-expanded', String(revealed))
-  const note = document.createElement('div')
-  note.className = 'test-notice'
-  note.setAttribute('role', 'note')
   note.append(message, reveal)
   if (!notice.revealed) return [note]
   reveal.setAttribute('aria-controls', elementId.planted)
@@ -181,20 +194,49 @@ function depthControl({ current, deepest }: Depth): HTMLElement[] {
   return [group]
 }
 
-/** A switch that shows or hides provenance, with a legend while it shows; none if every level is approved. */
-function provenanceControl({ shown, needed }: Marking): HTMLElement[] {
-  if (!needed) return []
+/**
+ * A switch that shows or hides provenance, unless the study fixes the marking,
+ * and a legend while the marks show; none if every level is approved.
+ */
+function provenanceControl({ shown, needed, switchable }: Marking): HTMLElement[] {
+  if (!needed || (!switchable && !shown)) return []
   const row = document.createElement('div')
   row.className = 'provenance'
-  const toggle = element('span', 'Provenance')
-  toggle.id = elementId.provenance
-  toggle.dataset.provenance = ''
-  toggle.title = `${shown ? 'Hide' : 'Show'} where the text came from`
-  makeControl(toggle)
-  toggle.setAttribute('aria-pressed', String(shown))
-  row.append(toggle)
+  if (switchable) {
+    const toggle = element('span', 'Provenance')
+    toggle.id = elementId.provenance
+    toggle.dataset.provenance = ''
+    toggle.title = `${shown ? 'Hide' : 'Show'} where the text came from`
+    makeControl(toggle)
+    toggle.setAttribute('aria-pressed', String(shown))
+    row.append(toggle)
+  }
   if (shown) row.append(legend())
   return [row]
+}
+
+/** A button that saves a study session's log, as it is when pressed. */
+function downloadControl(log: () => SessionLog | undefined): HTMLElement {
+  const button = document.createElement('button')
+  button.textContent = 'Download log'
+  button.className = 'download'
+  button.id = elementId.download
+  button.type = 'button'
+  button.addEventListener('click', () => {
+    const current = log()
+    if (current === undefined) return
+    const file = logFile(current)
+    const url = URL.createObjectURL(new Blob([file.text], { type: 'application/json' }))
+    const link = document.createElement('a')
+    link.href = url
+    link.download = file.name
+    // Some browsers download only from a link on the page, and read the file after the click returns.
+    document.body.append(link)
+    link.click()
+    link.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 60_000)
+  })
+  return button
 }
 
 /** Each provenance in its own style, after its mark. The marks are hidden from screen readers, which hear the names. */
@@ -242,6 +284,11 @@ function renderBlock(block: ViewBlock): Node[] {
 /** `depth` counts the elaborated phrases around this one, so nested shades alternate. */
 function renderInline(inline: ViewInline, depth: number): Node[] {
   if (inline.kind === 'text') return [document.createTextNode(inline.text)]
+
+  if (inline.kind === 'fixed') {
+    const phrase = element('span', inline.text)
+    return [...marks(phrase, inline.provenance), phrase]
+  }
 
   if (inline.kind === 'phrase') {
     const phrase = document.createElement('span')
@@ -376,6 +423,7 @@ export const elementId = {
   provenance: 'elastic-provenance',
   reveal: 'elastic-reveal',
   planted: 'elastic-planted',
+  download: 'elastic-download',
 }
 
 function makeControl(control: HTMLElement): void {

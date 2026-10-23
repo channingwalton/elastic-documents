@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { createReader } from './reader'
+import { defaultConditions } from './conditions'
+import { createReader, logFile } from './reader'
 import { documentFrom, testDocument } from './testing'
 
 const stretchtext = { note: 'Stretchtext', date: '2026-10-19', quote: 'the reader remains oriented' }
@@ -466,31 +467,108 @@ describe('provenance', () => {
     const shown = reader.view()
 
     expect(reader.dispatch({ kind: 'provenance' })).toEqual({ focus: { kind: 'provenance' }, keepStill: true })
-    expect(reader.marking()).toEqual({ shown: false, needed: true })
+    expect(reader.marking()).toEqual({ shown: false, needed: true, switchable: true })
     expect(JSON.stringify(reader.view())).not.toContain('provenance')
 
     reader.dispatch({ kind: 'provenance' })
-    expect(reader.marking()).toEqual({ shown: true, needed: true })
+    expect(reader.marking()).toEqual({ shown: true, needed: true, switchable: true })
     expect(reader.view()).toEqual(shown)
   })
 
-  it('needs marking only when the document has text other than approved', () => {
+  it('offers the switch only when the document has text other than approved', () => {
     const approved = documentFrom({
       title: 'T',
       blocks: [['A ', { id: 'a', short: 'phrase', elaborate: ['longer phrase'], derive: ['A step.'], ground: [elastic] }]],
     })
     const withShort = (short: unknown) => documentFrom({ title: 'T', blocks: [[{ id: 'a', short, elaborate: ['a'] }]] })
 
-    expect(createReader(approved).marking()).toEqual({ shown: true, needed: false })
-    expect(createReader(withShort({ provenance: 'compression', text: 'a' })).marking().needed).toBe(true)
-    expect(createReader(marked).marking().needed).toBe(true)
-    expect(createReader(rich).marking().needed).toBe(true)
+    expect(createReader(approved).marking()).toEqual({ shown: true, needed: false, switchable: false })
+    expect(createReader(withShort({ provenance: 'compression', text: 'a' })).marking().switchable).toBe(true)
+    expect(createReader(marked).marking().switchable).toBe(true)
+    expect(createReader(rich).marking().switchable).toBe(true)
+  })
+})
+
+describe('conditions', () => {
+  /** A compressed paragraph with a phrase that has several operations, and one of the author's that has only sources. */
+  const mixed = documentFrom({
+    title: 'T',
+    blocks: [
+      {
+        provenance: 'compression',
+        inlines: [
+          { id: 'gist', short: 'A gist', elaborate: { provenance: 'approved', inlines: ['The author wrote this.'] }, ground: [elastic], challenge: ['An objection.'] },
+          ' and ',
+          { id: 'sourced', short: { provenance: 'approved', text: 'a sourced claim' }, ground: [elastic] },
+        ],
+      },
+    ],
+  })
+
+  it('offers Elaborate alone as the one control, leaving a phrase with nothing else to open marked but not openable', () => {
+    const reader = createReader(mixed, { operations: 'elaborate', provenance: 'switchable' })
+
+    expect(reader.dispatch({ kind: 'toggle', id: 'gist', operation: 'ground' })).toBeUndefined()
+    expect(reader.dispatch({ kind: 'activate', id: 'sourced' })).toBeUndefined()
+    expect(reader.dispatch({ kind: 'activate', id: 'gist' })).toEqual({ focus: { kind: 'long', id: 'gist' }, keepStill: true })
+    expect(reader.view()[0]?.inlines).toEqual([
+      { kind: 'long', id: 'gist', short: 'A gist', provenance: 'approved', inlines: [text('The author wrote this.')], chips: [{ kind: 'collapse' }] },
+      text(' and '),
+      { kind: 'fixed', id: 'sourced', text: 'a sourced claim', provenance: 'approved' },
+    ])
+  })
+
+  it('offers depths only as deep as the Elaborates the reader can reach', () => {
+    const deepChallenge = documentFrom({
+      title: 'T',
+      blocks: [[{ id: 'a', short: 'a', elaborate: ['a at length'], challenge: [[{ id: 'b', short: 'b', elaborate: ['b ', { id: 'c', short: 'c', elaborate: ['c at length'] }] }]] }]],
+    })
+
+    expect(createReader(deepChallenge).depth()).toEqual({ current: 0, deepest: 2 })
+    expect(createReader(deepChallenge, { operations: 'elaborate', provenance: 'switchable' }).depth()).toEqual({ current: 0, deepest: 1 })
+  })
+
+  it('fixes provenance marking shown or hidden, with no switch to change it', () => {
+    const shown = createReader(mixed, { operations: 'all', provenance: 'shown' })
+    const hidden = createReader(mixed, { operations: 'all', provenance: 'hidden' })
+
+    expect([shown.marking(), hidden.marking()]).toEqual([
+      { shown: true, needed: true, switchable: false },
+      { shown: false, needed: true, switchable: false },
+    ])
+    expect(shown.dispatch({ kind: 'provenance' })).toBeUndefined()
+    expect(hidden.dispatch({ kind: 'provenance' })).toBeUndefined()
+    expect([shown.marking().shown, hidden.marking().shown]).toEqual([true, false])
+    expect(JSON.stringify(shown.view())).toContain('provenance')
+    expect(JSON.stringify(hidden.view())).not.toContain('provenance')
+  })
+
+  /** The author's paragraph, whose only AI text, and only planted error, sit in a Challenge. */
+  const challengedOnly = documentFrom({
+    title: 'T',
+    blocks: [[{ id: 'a', short: 'a', elaborate: ['a at length'], challenge: [['An objection about ', { id: 'c1', short: 'instruction', elaborate: ['instruction at length'] }]] }]],
+    planted: [{ level: 'c1', original: 'prompts', error: 'Changes the subject.' }],
+  })
+  const elaborateOnly = { operations: 'elaborate', provenance: 'switchable' } as const
+
+  it('offers the switch only for text the reader can reach under the conditions', () => {
+    expect(createReader(challengedOnly).marking().switchable).toBe(true)
+    expect(createReader(challengedOnly, elaborateOnly).marking().switchable).toBe(false)
+  })
+
+  it('answers no phrase, banner or reveal for content the conditions take away', () => {
+    const reader = createReader(challengedOnly, elaborateOnly)
+
+    expect(reader.dispatch({ kind: 'activate', id: 'c1' })).toBeUndefined()
+    expect(reader.dispatch({ kind: 'toggle', id: 'c1', operation: 'elaborate' })).toBeUndefined()
+    expect(reader.dispatch({ kind: 'reveal' })).toBeUndefined()
+    expect(reader.notice()).toBeUndefined()
   })
 })
 
 describe('notice', () => {
   it('reports how many errors a test document has planted, and nothing for any other document', () => {
-    expect(createReader(testDocument(2)).notice()).toEqual({ planted: 2, revealed: false })
+    expect(createReader(testDocument(2)).notice()).toEqual({ planted: 2, revealed: false, study: false })
     expect(createReader(rich).notice()).toBeUndefined()
   })
 
@@ -501,6 +579,7 @@ describe('notice', () => {
     expect(reader.notice()).toEqual({
       planted: 2,
       revealed: true,
+      study: false,
       statements: [
         { level: 'p1', text: 'More instruction helps', original: 'More instruction hurts', error: 'Contradicts the passage.' },
         { level: 'p2', text: 'As 2025 benchmarks showed', original: 'Capability is uneven', error: 'The passage names no benchmarks.' },
@@ -509,7 +588,7 @@ describe('notice', () => {
 
     reader.dispatch({ kind: 'reveal' })
 
-    expect(reader.notice()).toEqual({ planted: 2, revealed: false })
+    expect(reader.notice()).toEqual({ planted: 2, revealed: false, study: false })
   })
 
   it('keeps the planted statements revealed while the reader opens phrases, chooses a depth or switches provenance', () => {
@@ -523,10 +602,118 @@ describe('notice', () => {
     expect(reader.notice()?.revealed).toBe(true)
   })
 
+  it('counts and reveals only the planted errors the reader can reach under the conditions', () => {
+    const challenged = documentFrom({
+      title: 'T',
+      blocks: [
+        {
+          provenance: 'compression',
+          inlines: [
+            {
+              id: 'p1',
+              short: { provenance: 'compression', text: 'More instruction helps' },
+              elaborate: { provenance: 'approved', inlines: ['More instruction hurts.'] },
+              challenge: [['An objection about ', { id: 'c1', short: 'instruction', elaborate: ['instruction at length'] }]],
+            },
+          ],
+        },
+      ],
+      planted: [
+        { level: 'p1', original: 'More instruction hurts', error: 'Contradicts the passage.' },
+        { level: 'c1', original: 'prompts', error: 'Changes the subject.' },
+      ],
+    })
+    const reader = createReader(challenged, { operations: 'elaborate', provenance: 'switchable' })
+
+    expect(createReader(challenged).notice()).toEqual({ planted: 2, revealed: false, study: false })
+    expect(reader.notice()).toEqual({ planted: 1, revealed: false, study: false })
+
+    reader.dispatch({ kind: 'reveal' })
+
+    expect(reader.notice()).toEqual({
+      planted: 1,
+      revealed: true,
+      study: false,
+      statements: [{ level: 'p1', text: 'More instruction helps', original: 'More instruction hurts', error: 'Contradicts the passage.' }],
+    })
+  })
+
+  it('in a study session, says only that the document is a study document, and reveals nothing until the debrief', () => {
+    const reader = createReader(testDocument(2), { ...defaultConditions, session: 'reader-A' })
+
+    expect(reader.notice()).toEqual({ planted: 2, revealed: false, study: true })
+    expect(reader.dispatch({ kind: 'reveal' })).toBeUndefined()
+    expect(reader.notice()).toEqual({ planted: 2, revealed: false, study: true })
+  })
+
   it('reveals nothing in a document with nothing planted', () => {
     const reader = createReader(rich)
 
     expect(reader.dispatch({ kind: 'reveal' })).toBeUndefined()
     expect(reader.notice()).toBeUndefined()
+  })
+})
+
+describe('session log', () => {
+  /** A clock that moves on a second each time it is read, from 10:00 UTC on 23 October 2026. */
+  function ticking(): () => Date {
+    let seconds = 0
+    return () => new Date(Date.UTC(2026, 9, 23, 10, 0, seconds++))
+  }
+  const at = (seconds: number) => `2026-10-23T10:00:0${seconds}.000Z`
+
+  it('saves a log as JSON in a file named for the reader and when the session started', () => {
+    const reader = createReader(rich, { ...defaultConditions, session: 'reader-A' }, ticking())
+    reader.dispatch({ kind: 'activate', id: 'idea' })
+    const log = reader.log()
+    if (log === undefined) throw new Error('expected a session log')
+
+    const file = logFile(log)
+
+    expect(file.name).toBe('elastic-log-reader-A-2026-10-23T10-00-00-000Z.json')
+    expect([JSON.parse(file.text), file.text.endsWith('}\n')]).toEqual([log, true])
+  })
+
+  it('logs nothing outside a study session', () => {
+    expect(createReader(rich).log()).toBeUndefined()
+  })
+
+  it('logs each intent the page acts on, with when, and which operations it opened or closed', () => {
+    const reader = createReader(rich, { ...defaultConditions, session: 'reader-A' }, ticking())
+
+    reader.dispatch({ kind: 'activate', id: 'idea' })
+    reader.dispatch({ kind: 'toggle', id: 'idea', operation: 'ground' })
+    reader.dispatch({ kind: 'activate', id: 'nowhere' })
+    reader.dispatch({ kind: 'depth', depth: 1 })
+    reader.dispatch({ kind: 'activate', id: 'idea' })
+
+    expect(reader.log()).toEqual({
+      session: 'reader-A',
+      document: 'T',
+      conditions: { operations: 'all', provenance: 'switchable' },
+      started: at(0),
+      entries: [
+        { at: at(1), intent: { kind: 'activate', id: 'idea' }, opened: [], closed: [] },
+        { at: at(2), intent: { kind: 'toggle', id: 'idea', operation: 'ground' }, opened: [{ id: 'idea', operation: 'ground' }], closed: [] },
+        {
+          at: at(3),
+          intent: { kind: 'depth', depth: 1 },
+          opened: [
+            { id: 'idea', operation: 'elaborate' },
+            { id: 'more', operation: 'elaborate' },
+          ],
+          closed: [],
+        },
+        {
+          at: at(4),
+          intent: { kind: 'activate', id: 'idea' },
+          opened: [],
+          closed: [
+            { id: 'idea', operation: 'ground' },
+            { id: 'idea', operation: 'elaborate' },
+          ],
+        },
+      ],
+    })
   })
 })

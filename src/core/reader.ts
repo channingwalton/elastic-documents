@@ -1,7 +1,9 @@
+import { defaultConditions, type Conditions } from './conditions'
 import {
   available,
   hasUnapprovedText,
   indexStretches,
+  mapStretches,
   type ElasticDocument,
   type IndexedStretch,
   type Operation,
@@ -50,10 +52,15 @@ export interface Depth {
   readonly deepest: number
 }
 
-/** Whether the page marks provenance, and whether the document has any text but approved text to mark. */
+/**
+ * Whether the page marks provenance, whether the document has any text but
+ * approved text to mark, and whether the reader can switch the marking: only
+ * when there is something to mark and the study does not fix it.
+ */
 export interface Marking {
   readonly shown: boolean
   readonly needed: boolean
+  readonly switchable: boolean
 }
 
 /** A planted statement as the reader sees it, what is wrong with it, and what the generator wrote there. */
@@ -64,10 +71,38 @@ export interface PlantedStatement {
   readonly error: string
 }
 
-/** What a test document's banner says: how many of its statements are deliberately false, and, once revealed, which. */
+/**
+ * What a test document's banner says: how many of its statements are
+ * deliberately false, and, once revealed, which. In a study session it says
+ * only that the document is a study document, and reveals nothing until the
+ * debrief, when the reader opens it without the session.
+ */
 export type Notice =
-  | { readonly planted: number; readonly revealed: false }
-  | { readonly planted: number; readonly revealed: true; readonly statements: readonly PlantedStatement[] }
+  | { readonly planted: number; readonly revealed: false; readonly study: boolean }
+  | { readonly planted: number; readonly revealed: true; readonly study: false; readonly statements: readonly PlantedStatement[] }
+
+/** An operation open on a phrase. */
+export interface OpenOperation {
+  readonly id: string
+  readonly operation: Operation
+}
+
+/** One thing the reader did in a study session, when, and which operations it opened or closed. */
+export interface LogEntry {
+  readonly at: string
+  readonly intent: Intent
+  readonly opened: readonly OpenOperation[]
+  readonly closed: readonly OpenOperation[]
+}
+
+/** A study session's log: who read which document, under which conditions, from when, and what they did. */
+export interface SessionLog {
+  readonly session: string
+  readonly document: string
+  readonly conditions: Omit<Conditions, 'session'>
+  readonly started: string
+  readonly entries: readonly LogEntry[]
+}
 
 export interface Reader {
   readonly view: () => ViewBlock[]
@@ -75,23 +110,36 @@ export interface Reader {
   readonly marking: () => Marking
   /** The banner of a test document, which the reader cannot dismiss; none for any other document. */
   readonly notice: () => Notice | undefined
+  /** What the reader has done in a study session; none outside one. */
+  readonly log: () => SessionLog | undefined
   readonly dispatch: (intent: Intent) => Effect | undefined
 }
 
-export function createReader(document: ElasticDocument): Reader {
+/**
+ * A reader of the document, under the study's conditions, if any. In a study
+ * session it logs each intent the page acts on, timed by `now`, even one that
+ * leaves the page as it was, such as choosing the depth it is already at.
+ */
+export function createReader(given: ElasticDocument, conditions: Conditions = defaultConditions, now: () => Date = () => new Date()): Reader {
+  const document = conditions.operations === 'elaborate' ? elaborateOnly(given) : given
   const stretches = indexStretches(document)
   let deepest = 0
   for (const { stretch, level } of stretches.values()) if (stretch.elaborate) deepest = Math.max(deepest, level)
   const needed = hasUnapprovedText(document)
-  let state = emptyState
+  const switchable = conditions.provenance === 'switchable' && needed
+  let state: ReaderState = { ...emptyState, showProvenance: conditions.provenance !== 'hidden' }
+  const { session, operations, provenance } = conditions
+  const started = now().toISOString()
+  const entries: LogEntry[] = []
 
   const transition = (intent: Intent): Transition | undefined => {
     if (intent.kind === 'depth') return deepen(stretches, deepest, state, intent.depth)
     if (intent.kind === 'provenance') {
+      if (!switchable) return undefined
       return { state: { ...state, showProvenance: !state.showProvenance }, effect: { focus: { kind: 'provenance' }, keepStill: true } }
     }
     if (intent.kind === 'reveal') {
-      if (document.planted === undefined) return undefined
+      if (session !== undefined || notice(document, stretches, state, session) === undefined) return undefined
       return { state: { ...state, revealed: !state.revealed }, effect: { focus: { kind: 'reveal' }, keepStill: true } }
     }
     const indexed = stretches.get(intent.id)
@@ -101,12 +149,17 @@ export function createReader(document: ElasticDocument): Reader {
   return {
     view: () => view(document, state),
     depth: () => ({ current: matchingDepth(stretches, state), deepest }),
-    marking: () => ({ shown: state.showProvenance, needed }),
-    notice: () => notice(document, stretches, state),
+    marking: () => ({ shown: state.showProvenance, needed, switchable }),
+    notice: () => notice(document, stretches, state, session),
+    log: () => (session === undefined ? undefined : { session, document: given.title, conditions: { operations, provenance }, started, entries: [...entries] }),
     dispatch: (intent) => {
       const next = transition(intent)
-      if (next) state = next.state
-      return next?.effect
+      if (next === undefined) return undefined
+      if (session !== undefined) {
+        entries.push({ at: now().toISOString(), intent, opened: openedIn(next.state, state), closed: openedIn(state, next.state) })
+      }
+      state = next.state
+      return next.effect
     },
   }
 }
@@ -116,12 +169,37 @@ interface Transition {
   readonly effect: Effect
 }
 
-function notice(document: ElasticDocument, stretches: ReadonlyMap<string, IndexedStretch>, state: ReaderState): Notice | undefined {
-  const { planted } = document
-  if (planted === undefined) return undefined
-  if (!state.revealed) return { planted: planted.length, revealed: false }
-  const statements = planted.map(({ level, original, error }) => ({ level, text: stretches.get(level)?.stretch.short.text ?? '', original, error }))
-  return { planted: planted.length, revealed: true, statements }
+/** A session log as a file of JSON, named for the reader and when the session started, so a study's logs sort by reader. */
+export function logFile(log: SessionLog): { readonly name: string; readonly text: string } {
+  return { name: `elastic-log-${log.session}-${log.started.replace(/[:.]/g, '-')}.json`, text: `${JSON.stringify(log, null, 2)}\n` }
+}
+
+/** The operations open in `after` that are not open in `before`. */
+function openedIn(after: ReaderState, before: ReaderState): OpenOperation[] {
+  return [...after.open].flatMap(([id, operations]) =>
+    [...operations].filter((operation) => !openOperations(before, id).has(operation)).map((operation) => ({ id, operation })),
+  )
+}
+
+/** The document with every operation but Elaborate taken away, for a single "more detail" control. */
+function elaborateOnly(document: ElasticDocument): ElasticDocument {
+  return mapStretches(document, ({ kind, id, short, elaborate }) => ({ kind, id, short, ...(elaborate === undefined ? {} : { elaborate }) }))
+}
+
+/** The banner for the planted errors the reader can reach, which a study condition may have taken some of away; none if it took them all. */
+function notice(
+  document: ElasticDocument,
+  stretches: ReadonlyMap<string, IndexedStretch>,
+  state: ReaderState,
+  session: string | undefined,
+): Notice | undefined {
+  const statements = (document.planted ?? []).flatMap(({ level, original, error }) => {
+    const found = stretches.get(level)
+    return found === undefined ? [] : [{ level, text: found.stretch.short.text, original, error }]
+  })
+  if (statements.length === 0) return undefined
+  const planted = statements.length
+  return state.revealed && session === undefined ? { planted, revealed: true, study: false, statements } : { planted, revealed: false, study: session !== undefined }
 }
 
 /**

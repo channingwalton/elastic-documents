@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { defaultConditions, type Conditions } from '../core/conditions'
 import type { Operation } from '../core/document'
 import { documentFrom, testDocument } from '../core/testing'
 import { elementId, mount, showErrors } from './render'
@@ -785,10 +786,18 @@ describe('showErrors', () => {
     const container = document.createElement('div')
     showErrors(container, ['title: expected a string', 'blocks: expected an array'])
 
+    expect(container.querySelector('h1')?.textContent).toBe('This document has errors')
     expect([...container.querySelectorAll('li')].map((li) => li.textContent)).toEqual([
       'title: expected a string',
       'blocks: expected an array',
     ])
+  })
+
+  it('heads the errors as it is told, such as for a link with a parameter it does not know', () => {
+    const container = document.createElement('div')
+    showErrors(container, ['provenence: unknown parameter'], 'This link has errors')
+
+    expect(container.querySelector('h1')?.textContent).toBe('This link has errors')
   })
 })
 
@@ -856,5 +865,137 @@ describe('a test document', () => {
     mount(container, nested)
 
     expect(container.firstElementChild?.tagName).toBe('H1')
+  })
+})
+
+describe('a study condition', () => {
+  /** A compressed paragraph with a phrase that has several operations, and one of the author's that has only sources. */
+  const mixed = documentFrom({
+    title: 'T',
+    blocks: [
+      {
+        provenance: 'compression',
+        inlines: [
+          {
+            id: 'gist',
+            short: 'A gist',
+            elaborate: { provenance: 'approved', inlines: ['The author wrote this.'] },
+            ground: [{ note: 'N', quote: 'The author wrote this.' }],
+            challenge: ['An objection.'],
+          },
+          ' and ',
+          { id: 'sourced', short: { provenance: 'approved', text: 'a sourced claim' }, ground: [{ note: 'N', quote: 'a claim' }] },
+          '.',
+        ],
+      },
+    ],
+  })
+
+  function mountedWith(conditions: Conditions): HTMLElement {
+    const container = document.createElement('div')
+    document.body.replaceChildren(container)
+    mount(container, mixed, conditions)
+    return container
+  }
+
+  it('offers Elaborate alone, drawing a phrase with nothing else to open as marked text rather than a control', () => {
+    const container = mountedWith({ operations: 'elaborate', provenance: 'switchable' })
+    const fixed = [...container.querySelectorAll('p span')].find((span) => span.textContent === 'a sourced claim')
+
+    expect([fixed?.getAttribute('role'), fixed?.className, fixed?.previousElementSibling?.getAttribute('aria-label')]).toEqual([
+      null,
+      'provenance-approved',
+      'Approved',
+    ])
+
+    click(control(container, 'gist'), 1)
+
+    expect([...container.querySelectorAll('[data-operation]')].map((button) => button.getAttribute('data-operation'))).toEqual(['elaborate'])
+  })
+
+  it('shows no Provenance switch when the condition fixes the marking, and no marks when it hides them', () => {
+    const shown = mountedWith({ operations: 'all', provenance: 'shown' })
+
+    expect([shown.querySelector('[data-provenance]'), shown.querySelectorAll('.provenance-mark').length > 0]).toEqual([null, true])
+    expect(shown.querySelector('.provenance-legend')?.textContent).toBe('ApprovedAI compressionAI addition')
+
+    const hidden = mountedWith({ operations: 'all', provenance: 'hidden' })
+
+    expect([hidden.querySelector('.provenance'), hidden.querySelectorAll('.provenance-mark').length]).toEqual([null, 0])
+  })
+})
+
+describe('a study session', () => {
+  function mountedIn(conditions: Conditions): HTMLElement {
+    const container = document.createElement('div')
+    document.body.replaceChildren(container)
+    mount(container, nested, conditions)
+    return container
+  }
+
+  it('offers a Download log button that saves the session’s log from a link on the page, which a held key does not press again', async () => {
+    const container = mountedIn({ ...defaultConditions, session: 'reader-A' })
+    const saved: Blob[] = []
+    const links: { name: string; onPage: boolean }[] = []
+    const revoked: string[] = []
+    vi.stubGlobal('URL', {
+      ...URL,
+      createObjectURL: (blob: Blob) => {
+        saved.push(blob)
+        return 'blob:log'
+      },
+      revokeObjectURL: (url: string) => {
+        revoked.push(url)
+      },
+    })
+    const save = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+      links.push({ name: this.download, onPage: this.isConnected })
+    })
+    // The page frees the file a minute after saving it, which must happen while the stand-ins are in place.
+    vi.useFakeTimers()
+    try {
+      click(control(container, 'outer'), 1)
+      const button = byId(container, elementId.download)
+
+      expect([button?.tagName, button?.textContent]).toEqual(['BUTTON', 'Download log'])
+
+      button?.click()
+      const log = JSON.parse((await saved[0]?.text()) ?? '{}')
+
+      expect([log.session, log.document, log.entries.map((entry: { intent: unknown }) => entry.intent)]).toEqual([
+        'reader-A',
+        'T',
+        [{ kind: 'activate', id: 'outer' }],
+      ])
+      expect([saved[0]?.type, links.map((link) => link.onPage), links[0]?.name.startsWith('elastic-log-reader-A-')]).toEqual(['application/json', [true], true])
+      expect(container.querySelector('a')).toBeNull()
+      expect(press(button ?? document.body, 'Enter', { repeat: true }).defaultPrevented).toBe(true)
+      expect(revoked).toEqual([])
+
+      vi.advanceTimersByTime(60_000)
+
+      expect(revoked).toEqual(['blob:log'])
+    } finally {
+      vi.useRealTimers()
+      save.mockRestore()
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('opens a test document with a study banner that does not count the errors or offer to show them', () => {
+    const container = document.createElement('div')
+    document.body.replaceChildren(container)
+    mount(container, testDocument(2), { ...defaultConditions, session: 'reader-A' })
+    const banner = container.firstElementChild
+
+    expect([banner?.getAttribute('role'), banner?.textContent]).toEqual([
+      'note',
+      'Study document. Some AI text in it is wrong on purpose; you’ll be shown which at the end.',
+    ])
+    expect(byId(container, elementId.reveal)).toBeNull()
+  })
+
+  it('offers no Download log outside a session', () => {
+    expect(byId(mountedIn(defaultConditions), elementId.download)).toBeNull()
   })
 })

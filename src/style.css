@@ -153,6 +153,18 @@ h1 {
   color: var(--background);
 }
 
+.download {
+  display: block;
+  margin: -0.4rem 0 1.4rem;
+  padding: 0.3em 0.65em;
+  border: 1px solid var(--control);
+  border-radius: 1em;
+  background: none;
+  color: var(--control);
+  cursor: pointer;
+  font: 0.75rem/1.4 system-ui, sans-serif;
+}
+
 .stretch {
   cursor: pointer;
   border-bottom: 1px dotted var(--stretch-line);
@@ -350,6 +362,7 @@ h1 {
 .depth [data-depth]:focus-visible,
 [data-provenance]:focus-visible,
 [data-reveal]:focus-visible,
+.download:focus-visible,
 .collapse:focus-visible,
 .chip:focus-visible,
 .close:focus-visible,

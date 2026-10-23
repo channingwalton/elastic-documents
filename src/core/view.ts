@@ -31,6 +31,8 @@ interface Marked {
 
 export type ViewInline =
   | { readonly kind: 'text'; readonly text: string }
+  /** A phrase with nothing the reader may open, under a study condition that takes its operations away. */
+  | ({ readonly kind: 'fixed'; readonly id: string; readonly text: string } & Marked)
   | ({ readonly kind: 'phrase'; readonly id: string; readonly text: string; readonly chips: readonly Chip[] } & Marked)
   | ({
       readonly kind: 'long'
@@ -94,6 +96,10 @@ function visible(
   for (const inline of inlines) {
     if (inline.kind === 'text') {
       result.push(inline)
+      continue
+    }
+    if (available(inline).length === 0) {
+      result.push({ kind: 'fixed', id: inline.id, text: inline.short.text, ...mark(inline.short.provenance, around, state) })
       continue
     }
     const open = openOperations(state, inline.id)
