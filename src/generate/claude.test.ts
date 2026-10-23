@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { claudeCompressor, type Run, type RunResult } from './claude'
+import type { CheckRequest } from './check'
+import { claudeChecker, claudeCompressor, type Run, type RunResult } from './claude'
 import type { CompressionRequest } from './generate'
 
 const request: CompressionRequest = {
@@ -130,5 +131,89 @@ ${request.passage}
     await Promise.all(Array.from({ length: 5 }, () => compressor.compress(request)))
 
     expect(most).toBe(2)
+  })
+})
+
+describe('claudeChecker', () => {
+  const asked: CheckRequest = {
+    passage: request.passage,
+    levels: [
+      { id: 'p1', text: 'Longer prompts fail' },
+      { id: 'p1-summary', text: 'Longer prompts fail small models.' },
+    ],
+  }
+  const judged = {
+    levels: [
+      { id: 'p1', claims: [{ claim: 'Longer prompts fail', verdict: 'supported', evidence: ['This fails in practice.'] }] },
+      { id: 'p1-summary', claims: [{ claim: 'Only small models', verdict: 'unsupported', evidence: [] }] },
+    ],
+  }
+
+  it('asks claude, with no tools, to judge the claims of the levels it names against the passage, in the shape of a schema', async () => {
+    const run = fakeRun(envelope({ structured_output: judged }))
+
+    await claudeChecker({ model: 'claude-opus-5-5', run }).check(asked)
+
+    const [call] = run.calls
+    expect(call?.command).toBe('claude')
+    expect(call?.args).toEqual(expect.arrayContaining(['-p', '--no-session-persistence', '--strict-mcp-config']))
+    expect(flag(call?.args ?? [], '--model')).toBe('claude-opus-5-5')
+    expect(flag(call?.args ?? [], '--tools')).toBe('')
+    expect(flag(call?.args ?? [], '--setting-sources')).toBe('')
+    expect(flag(call?.args ?? [], '--system-prompt')).toMatch(/judge each against the passage alone/)
+    expect(JSON.parse(flag(call?.args ?? [], '--json-schema') ?? '')).toMatchObject({
+      required: ['levels'],
+      properties: {
+        levels: {
+          items: {
+            required: ['id', 'claims'],
+            properties: {
+              id: { enum: ['p1', 'p1-summary'] },
+              claims: { minItems: 1, items: { properties: { verdict: { enum: ['supported', 'overstated', 'unsupported', 'contradicted'] } } } },
+            },
+          },
+        },
+      },
+    })
+    expect(call?.input).toBe(`Passage:
+${request.passage}
+
+Levels:
+p1: Longer prompts fail
+p1-summary: Longer prompts fail small models.
+`)
+  })
+
+  it('reads the judgements from the structured output', async () => {
+    expect(await claudeChecker({ model: 'm', run: fakeRun(envelope({ structured_output: judged })) }).check(asked)).toEqual(judged)
+  })
+
+  it('fails when the output is not judgements', async () => {
+    const check = (output: unknown) => claudeChecker({ model: 'm', run: fakeRun(envelope({ structured_output: output })) }).check(asked)
+    const claim = { claim: 'A claim', verdict: 'supported', evidence: ['This fails in practice.'] }
+
+    for (const output of [
+      undefined,
+      { levels: 'p1' },
+      { levels: [{ id: 1, claims: [claim] }] },
+      { levels: [{ id: 'p1', claims: [{ ...claim, verdict: 'plausible' }] }] },
+      { levels: [{ id: 'p1', claims: [{ ...claim, evidence: 'This fails' }] }] },
+      { levels: [{ id: 'p1', claims: [{ ...claim, claim: undefined }] }] },
+    ]) {
+      await expect(check(output)).rejects.toThrow(`claude failed: expected the judgements, got ${JSON.stringify(output)}`)
+    }
+  })
+
+  it('fails with what claude said, and fails the calls still waiting once one fails', async () => {
+    const run = fakeRun({ code: 1, stdout: '', stderr: 'Rate limited' })
+    const checker = claudeChecker({ model: 'm', run, concurrency: 1 })
+
+    const results = await Promise.allSettled([checker.check(asked), checker.check(asked)])
+
+    expect(results).toEqual([
+      { status: 'rejected', reason: new Error('claude failed: Rate limited') },
+      { status: 'rejected', reason: new Error('claude failed: Rate limited') },
+    ])
+    expect(run.calls).toHaveLength(1)
   })
 })

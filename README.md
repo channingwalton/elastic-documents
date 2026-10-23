@@ -78,6 +78,18 @@ npm run export -- "generated/Note.json"
 - The note parser reads Markdown line by line and gets some rare constructions wrong; [#16](https://github.com/channingwalton/elastic-documents/issues/16) moves it to a CommonMark parser.
 - The model is Claude, through `claude -p` (Claude Code run headless, with no tools); `--model` picks which, and Sonnet is the default. Notes holding client material need a local model, which ADR 0001 requires and which does not exist yet.
 
+A second model then checks what the first wrote:
+
+```sh
+npm run check -- "generated/Note.json"   # a review copy in generated/Note.review.json
+```
+
+- The checker reads each AI compression beside the author's text it compresses, lists the claims it makes, and judges each one supported, overstated (a hedge, condition or limit dropped), unsupported or contradicted.
+- It sees only the author's text, with AI text left out and the gap marked, so it cannot cite AI text as evidence. Each judgement quotes its evidence exactly, at least three words at a time, and no quote may span a gap.
+- A passage the checker gets wrong is asked about once more. If it gets it wrong again, the check fails and writes nothing.
+- The review copy is the document with every claim not judged supported shown under Challenge on the level that makes it, as an AI addition, with what the passage says instead. The command prints a count of claims by verdict.
+- Opus is the default checker; `--model` picks another. On a copy of a generated note with two planted errors, it flagged both, and a dropped "may" the generator had written.
+
 ## Running it
 
 ```sh
@@ -175,7 +187,22 @@ flowchart LR
 
 - `src/generate/note.ts` reads a note's Markdown as headings and plain-text passages.
 - `src/generate/generate.ts` decides which levels each passage gets, asks the `Compressor` port for them, marks their provenance and checks their quotes.
-- `src/generate/claude.ts` is the `Compressor` behind `claude -p`. `scripts/generate.ts` is the command, which reads the note and writes the document.
+- `src/generate/claude.ts` is the `Compressor` and the `Checker` behind `claude -p`, sharing one way of calling it. `scripts/generate.ts` is the command, which reads the note and writes the document.
+
+The check follows the same shape:
+
+```mermaid
+flowchart LR
+    D[Document JSON] --> K[checkDocument<br/>passages, retry, evidence check]
+    K -->|CheckRequest| C[Checker port]
+    C --> A[claude -p adapter]
+    K -->|flags| R[reviewCopy]
+    R --> J[Review copy JSON]
+```
+
+- `src/generate/check.ts` finds the author's text beneath each compression, asks the `Checker` port to judge the levels above it, asks again after a slip, and checks every quote.
+- `src/generate/review.ts` writes the review copy, with each flag under Challenge.
+- `scripts/check.ts` is the command, which reads the document and writes the review copy.
 
 ## Next ideas
 
