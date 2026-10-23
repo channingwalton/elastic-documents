@@ -38,6 +38,20 @@ describe('the stylesheet', () => {
     expect(rule).not.toMatch(/display:\s*none|visibility:\s*hidden/)
   })
 
+  for (const [mode, colours] of Object.entries(tokens())) {
+    it(`gives the text of a test document's banner a contrast of at least 4.5:1, in ${mode} mode`, () => {
+      const background = colours.get('warning-background')
+      const low = ['text', 'warning'].flatMap((foreground) => {
+        const colour = colours.get(foreground)
+        if (colour === undefined || background === undefined) return [`--${foreground} on --warning-background: missing`]
+        const ratio = contrast(colour, background)
+        return ratio < 4.5 ? [`--${foreground} on --warning-background: ${ratio.toFixed(2)}`] : []
+      })
+
+      expect(low).toEqual([])
+    })
+  }
+
   const text = ['text', 'compression', 'addition']
   const backgrounds = ['background', 'open-1', 'open-2', 'attachment']
 

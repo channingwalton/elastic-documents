@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { documentFrom } from '../core/testing'
-import { checkDocument, type CheckRequest, type CheckResponse, type Checker } from './check'
+import { checkDocument, scorePlanted, type CheckRequest, type CheckResponse, type Checker, type Flag } from './check'
 
 const long = 'A naive reading of execution classes is "weaker model, longer prompt". This fails in practice.'
 const medium = 'Model-specific prompts couple skills to products that change frequently.'
@@ -502,5 +502,31 @@ describe('checkDocument', () => {
       'p2: the contradicted claim "It contradicts" quotes no evidence',
       'p2: the supported claim "It holds" quotes no evidence',
     ])
+  })
+})
+
+describe('scorePlanted', () => {
+  const planted = [
+    { level: 'p1', original: 'Longer prompts help', error: 'Contradicts the passage.' },
+    { level: 'p2', original: 'Model names tie skills to products', error: 'Invents a cause.' },
+  ]
+  const flag = (level: string): Flag => ({ level, text: level, passage: long, claim: 'A claim', verdict: 'contradicted', evidence: ['This fails in practice.'] })
+
+  const checked = (levels: readonly string[], flags: readonly Flag[]) => ({
+    levels: levels.map((id) => ({ id, text: id, passage: long, claims: [] })),
+    flags,
+  })
+
+  it('counts a planted error as flagged when any claim of its level is flagged, and names those missed', () => {
+    expect(scorePlanted(planted, checked(['p1', 'p1-summary', 'p2'], [flag('p1'), flag('p1'), flag('p1-summary')]))).toEqual({
+      flagged: ['p1'],
+      missed: ['p2'],
+      unchecked: [],
+    })
+    expect(scorePlanted(planted, checked(['p1', 'p2'], [flag('p2'), flag('p1')]))).toEqual({ flagged: ['p1', 'p2'], missed: [], unchecked: [] })
+  })
+
+  it('names a planted error on a level the check never asked about, rather than count it as missed', () => {
+    expect(scorePlanted(planted, checked(['p1'], [flag('p1')]))).toEqual({ flagged: ['p1'], missed: [], unchecked: ['p2'] })
   })
 })

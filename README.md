@@ -56,6 +56,7 @@ The questions the spike should help answer:
 - **Quiet buttons.** An elaborated phrase shows its buttons only while the pointer is over it or focus is inside it, and not in a phrase opened inside it. On a touch screen, tap its text. Pressed buttons for content open beneath stay, so the reader can see what is open. Hidden buttons stay in the tab order with their names.
 - **Depth control.** A row of buttons beneath the title opens the whole document to a depth, a cheap form of semantic zooming (Engelbart's level clipping). Depth 0 shows the short forms; depth N opens every Elaborate from level 1 down to N. Levels start again at 1 inside content opened beneath a phrase. Choosing a depth resets whatever the reader opened or closed by hand. A depth is pressed only while every Elaborate is open exactly to it, counting those inside closed content, so no depth is pressed once the page has drifted.
 - **Provenance marking.** Every paragraph, short form and long form is approved (written or approved by the author), an AI compression of approved text, or an AI addition. The author's words keep the body face. AI text takes a sans face and its own colour: upright for a compression, italic for an addition. A mark (✓, ≈ or ✦), which screen readers announce, names the provenance at the start of each level that differs from the text around it. Nothing marks where the text returns to the provenance around it, though the face and colour change back. A legend beside the Provenance switch explains the marks, and the switch hides them all.
+- **Test documents.** A document with planted errors opens with a banner, which nothing closes, saying how many of its statements are deliberately false. Its Show which button lists each one, what is wrong with it, and what the generator wrote there.
 - **Keyboard and screen reader support.** Every control is focusable, focus follows what opens and closes, and controls name what they reveal.
 
 It currently shows a hand-written sample, [`examples/sample.json`](examples/sample.json).
@@ -89,6 +90,18 @@ npm run check -- "generated/Note.json"   # a review copy in generated/Note.revie
 - A passage the checker gets wrong is asked about once more. If it gets it wrong again, the check fails and writes nothing.
 - The review copy is the document with every claim not judged supported shown under Challenge on the level that makes it, as an AI addition, with what the passage says instead. The command prints a count of claims by verdict.
 - Opus is the default checker; `--model` picks another. On a copy of a generated note with two planted errors, it flagged both, and a dropped "may" the generator had written.
+
+To test the checker, or a reader, plant deliberate errors in a copy:
+
+```sh
+npm run plant -- "generated/Note.json" plants.json   # a test document in generated/Note.planted.json
+npm run check -- "generated/Note.planted.json"
+```
+
+- `plants.json` lists each error as `{ "level": "p6", "text": "what the level is to say", "error": "what is wrong with it" }`.
+- Each error replaces the short form of a level of AI text, which stays marked as AI text. The command refuses the author's text, since an error there would show as theirs.
+- The test document records each planted level, what it said before and what is wrong, so the reader opens it with its banner, and so does its review copy.
+- Checking a test document also prints how many of its planted errors were flagged, naming any missed. A planted error counts as flagged when any claim of its level is. One on a level the checker skips, such as an AI addition, is listed as not checked rather than missed.
 
 ## Running it
 
@@ -156,6 +169,23 @@ A paragraph, short form or long form can be marked with where it came from: `app
 - A mark the build forgets inside a compressed level leaves the text marked as AI text, not as approved. A forgotten mark on a top-level paragraph does show as approved, so the build must mark every paragraph it writes.
 - Exemplify, Challenge and Reframe content is an addition, and so is every level inside an addition; any other mark there is an error. Ground quotes are always approved and take no mark.
 
+### Test documents
+
+A test document lists its planted errors beside its blocks:
+
+```json
+"planted": [
+  {
+    "level": "p6",
+    "original": "Past a point, more instruction makes small models worse.",
+    "error": "Contradicts the note, which says more instruction makes small models worse."
+  }
+]
+```
+
+- Each entry names a level whose short form holds a deliberate error, what it said before, and what is wrong. The level must be AI text, planted once, and no longer say what it said before.
+- Any other field at the top of a document is an error, so a misspelt `planted` cannot leave a test document looking like any other.
+
 ## How the code is arranged
 
 The logic lives in a tested core with no DOM. The browser code draws what the core says and forwards the reader's clicks and keys to it as intents.
@@ -165,10 +195,10 @@ flowchart LR
     J[Document JSON] --> P[parseDocument]
     P --> R[Reader core<br/>state and transitions]
     R -->|view model| B[Browser adapter<br/>draws the page]
-    B -->|intents: activate, toggle, depth, provenance| R
+    B -->|intents: activate, toggle, depth, provenance, reveal| R
 ```
 
-- `src/core/document.ts` parses and validates documents.
+- `src/core/document.ts` parses and validates documents, and writes them back as JSON.
 - `src/core/state.ts` and `src/core/reader.ts` hold what is open and decide what each intent does, including where focus goes.
 - `src/core/view.ts` turns the document and state into what the reader sees, including where provenance changes.
 - `src/browser/render.ts` draws the view and handles clicks and keys.
@@ -203,6 +233,7 @@ flowchart LR
 - `src/generate/check.ts` finds the author's text beneath each compression, asks the `Checker` port to judge the levels above it, asks again after a slip, and checks every quote.
 - `src/generate/review.ts` writes the review copy, with each flag under Challenge.
 - `scripts/check.ts` is the command, which reads the document and writes the review copy.
+- `src/generate/plant.ts` plants errors in a document and records them, and `scripts/plant.ts` is its command.
 
 ## Next ideas
 

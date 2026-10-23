@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { available, count, indexStretches, parseDocument, type ElasticDocument, type Inline, type Stretch } from './document'
+import { available, count, indexStretches, mapStretches, parseDocument, toJson, type ElasticDocument, type Inline, type Stretch } from './document'
 import sample from '../../examples/sample.json'
-import { documentFrom } from './testing'
+import { documentFrom, testDocument } from './testing'
 
 describe('parseDocument', () => {
   it('reads strings as text and objects as stretches, at any depth', () => {
@@ -468,6 +468,82 @@ describe('parseDocument provenance', () => {
   })
 })
 
+describe('parseDocument planted errors', () => {
+  /** A generated passage whose headline is AI text, beside a phrase of the author's own. */
+  const tested = {
+    title: 'Test',
+    blocks: [
+      {
+        provenance: 'compression',
+        inlines: [
+          {
+            id: 'p1',
+            short: { provenance: 'compression', text: 'More instruction helps small models' },
+            elaborate: { provenance: 'approved', inlines: ['Past a point, more instruction makes small models worse.'] },
+          },
+        ],
+      },
+      ['The author’s ', { id: 'own', short: 'own phrase', elaborate: ['own phrase, at length'] }, '.'],
+    ],
+  }
+  const planted = {
+    level: 'p1',
+    original: 'More instruction hurts small models',
+    error: 'Contradicts the passage, which says more instruction makes small models worse.',
+  }
+
+  it('reads each level planted with an error, with what the generator wrote and what is wrong', () => {
+    const parsed = parseDocument({ ...tested, planted: [planted] })
+
+    expect(parsed.ok && parsed.document.planted).toEqual([planted])
+  })
+
+  it('leaves a document with no planted errors as it was', () => {
+    const parsed = parseDocument(tested)
+
+    expect(parsed.ok && parsed.document).not.toHaveProperty('planted')
+  })
+
+  it('rejects a planted level that is the author’s text, does not exist, or is planted twice', () => {
+    const parsed = parseDocument({ ...tested, planted: [planted, { ...planted, level: 'own' }, { ...planted, level: 'p9' }, planted] })
+
+    expect(parsed).toEqual({
+      ok: false,
+      errors: [
+        'planted[1].level: expected AI text, since an error planted in the author’s text would show as theirs',
+        'planted[2].level: no stretch has the id "p9"',
+        'planted[3].level: "p1" is planted more than once',
+      ],
+    })
+  })
+
+  it('rejects a planted level that still says what the generator wrote, so the banner counts only false statements', () => {
+    expect(parseDocument({ ...tested, planted: [{ ...planted, original: ' More instruction helps small models\n' }] })).toEqual({
+      ok: false,
+      errors: ['planted[0].original: the level still says this, so no error was planted in it'],
+    })
+  })
+
+  it('names the path of every malformed planted error', () => {
+    expect(parseDocument({ ...tested, planted: 'p1' })).toEqual({ ok: false, errors: ['planted: expected an array'] })
+    expect(parseDocument({ ...tested, planted: [] })).toEqual({ ok: false, errors: ['planted: expected at least one item'] })
+    expect(parseDocument({ ...tested, planted: ['p1', { original: '', error: ' ', note: 'x' }] })).toEqual({
+      ok: false,
+      errors: [
+        'planted[0]: expected an object',
+        'planted[1].note: unknown field',
+        'planted[1].level: expected a non-empty string',
+        'planted[1].original: expected a non-empty string',
+        'planted[1].error: expected a non-empty string',
+      ],
+    })
+  })
+
+  it('rejects a field it does not know at the top of the document, so a misspelt record cannot pass unnoticed', () => {
+    expect(parseDocument({ ...tested, plantd: [planted] })).toEqual({ ok: false, errors: ['plantd: unknown field'] })
+  })
+})
+
 describe('available and count', () => {
   const stretch: Stretch = {
     kind: 'stretch',
@@ -521,5 +597,89 @@ describe('indexStretches', () => {
       ['d', 'd', 1],
       ['e', 'e', 1],
     ])
+  })
+})
+
+describe('toJson', () => {
+  it('writes a document that reads back exactly as it was, planted errors and all', () => {
+    for (const document of [documentFrom(sample), testDocument(2)]) {
+      expect(parseDocument(toJson(document))).toEqual({ ok: true, document })
+    }
+  })
+
+  it('marks every level with its provenance', () => {
+    const document = documentFrom({
+      title: 'Marked',
+      blocks: [
+        [
+          'Plain ',
+          {
+            id: 'a',
+            short: 'phrase',
+            elaborate: ['the long form'],
+            ground: [{ note: 'Note', date: '2026-01-01', quote: 'the long form' }],
+            exemplify: [['An example with ', { id: 'b', short: 'a phrase', reframe: ['Put another way.'] }]],
+          },
+        ],
+      ],
+    })
+
+    expect(toJson(document)).toEqual({
+      title: 'Marked',
+      blocks: [
+        {
+          provenance: 'approved',
+          inlines: [
+            'Plain ',
+            {
+              id: 'a',
+              short: { provenance: 'approved', text: 'phrase' },
+              elaborate: { provenance: 'approved', inlines: ['the long form'] },
+              ground: [{ note: 'Note', date: '2026-01-01', quote: 'the long form' }],
+              exemplify: [
+                {
+                  provenance: 'addition',
+                  inlines: [
+                    'An example with ',
+                    {
+                      id: 'b',
+                      short: { provenance: 'addition', text: 'a phrase' },
+                      reframe: [{ provenance: 'addition', inlines: ['Put another way.'] }],
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    })
+  })
+
+})
+
+describe('mapStretches', () => {
+  const nestedDocument = documentFrom({
+    title: 'T',
+    blocks: [
+      [
+        { id: 'outer', short: 'outer', elaborate: ['the ', { id: 'inner', short: 'inner', elaborate: ['inner at length'] }] },
+        ' and ',
+        { id: 'listed', short: 'listed', derive: [['a step with ', { id: 'step', short: 'step', elaborate: ['a step at length'] }]] },
+      ],
+    ],
+  })
+
+  it('changes every stretch, wherever it is nested, after the stretches inside it', () => {
+    const seen: string[] = []
+
+    const changed = mapStretches(nestedDocument, (stretch) => {
+      seen.push(stretch.id)
+      return { ...stretch, short: { ...stretch.short, text: stretch.short.text.toUpperCase() } }
+    })
+
+    expect(seen).toEqual(['inner', 'outer', 'step', 'listed'])
+    expect([...indexStretches(changed).values()].map(({ stretch }) => stretch.short.text)).toEqual(['OUTER', 'INNER', 'LISTED', 'STEP'])
+    expect([...indexStretches(nestedDocument).values()].map(({ stretch }) => stretch.short.text)).toEqual(['outer', 'inner', 'listed', 'step'])
   })
 })

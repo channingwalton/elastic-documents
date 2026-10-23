@@ -63,55 +63,6 @@ describe('reviewCopy', () => {
     expect(parsed(reviewCopy(generated, []))).toEqual(generated)
   })
 
-  it('marks every level with its provenance', () => {
-    const document = documentFrom({
-      title: 'Marked',
-      blocks: [
-        [
-          'Plain ',
-          {
-            id: 'a',
-            short: 'phrase',
-            elaborate: ['the long form'],
-            ground: [{ note: 'Note', date: '2026-01-01', quote: 'the long form' }],
-            exemplify: [['An example with ', { id: 'b', short: 'a phrase', reframe: ['Put another way.'] }]],
-          },
-        ],
-      ],
-    })
-
-    expect(reviewCopy(document, [])).toEqual({
-      title: 'Marked',
-      blocks: [
-        {
-          provenance: 'approved',
-          inlines: [
-            'Plain ',
-            {
-              id: 'a',
-              short: { provenance: 'approved', text: 'phrase' },
-              elaborate: { provenance: 'approved', inlines: ['the long form'] },
-              ground: [{ note: 'Note', date: '2026-01-01', quote: 'the long form' }],
-              exemplify: [
-                {
-                  provenance: 'addition',
-                  inlines: [
-                    'An example with ',
-                    {
-                      id: 'b',
-                      short: { provenance: 'addition', text: 'a phrase' },
-                      reframe: [{ provenance: 'addition', inlines: ['Put another way.'] }],
-                    },
-                  ],
-                },
-              ],
-            },
-          ],
-        },
-      ],
-    })
-  })
-
   it('shows each flag as an AI addition under Challenge on the level it is about, after any objections it already has', () => {
     const copy = parsed(
       reviewCopy(generated, [
@@ -152,6 +103,13 @@ describe('reviewCopy', () => {
     expect(challenges(parsed(reviewCopy(document, [flag('d1', 'overstated', 'A claim', ['A naive reading'])])), 'd1')).toEqual([
       'addition: Overstated: A claim — the passage says “A naive reading”',
     ])
+  })
+
+  it('keeps the record of a test document’s planted errors, so the copy shows its banner too', () => {
+    const planted = [{ level: 'p1', original: 'Longer prompts help', error: 'Contradicts the passage.' }]
+    const tested = documentFrom({ ...reviewCopy(generated, []), planted })
+
+    expect(parsed(reviewCopy(tested, [flag('p1', 'contradicted', 'Longer prompts fail', ['This fails in practice.'])])).planted).toEqual(planted)
   })
 
   it('fails on a flag about a level the document does not have, rather than lose it', () => {

@@ -8,7 +8,7 @@ import {
   type Passage,
   type Provenance,
 } from '../core/document'
-import { createReader, type Depth, type FocusTarget, type Intent, type Marking } from '../core/reader'
+import { createReader, type Depth, type FocusTarget, type Intent, type Marking, type Notice } from '../core/reader'
 import type { Chip, ViewAttachment, ViewBlock, ViewInline } from '../core/view'
 
 /**
@@ -16,7 +16,7 @@ import type { Chip, ViewAttachment, ViewBlock, ViewInline } from '../core/view'
  * keys to the core as intents. A closed phrase is a control; its operation
  * buttons sit beside it and an elaborated phrase ends with them, so no control
  * ever sits inside another. The depth control and the provenance switch sit
- * beneath the title.
+ * beneath the title, and a test document's banner above it.
  */
 export function mount(container: HTMLElement, elastic: ElasticDocument): void {
   const reader = createReader(elastic)
@@ -26,6 +26,7 @@ export function mount(container: HTMLElement, elastic: ElasticDocument): void {
 
   const draw = (): void => {
     container.replaceChildren(
+      ...banner(reader.notice()),
       element('h1', elastic.title),
       ...depthControl(reader.depth()),
       ...provenanceControl(reader.marking()),
@@ -61,16 +62,17 @@ export function mount(container: HTMLElement, elastic: ElasticDocument): void {
 
 function controlAt(target: EventTarget | null): HTMLElement | null {
   return target instanceof Element
-    ? target.closest<HTMLElement>('[data-activate], [data-toggle], [data-depth], [data-provenance]')
+    ? target.closest<HTMLElement>('[data-activate], [data-toggle], [data-depth], [data-provenance], [data-reveal]')
     : null
 }
 
 function intentOf(control: HTMLElement | null): Intent | undefined {
-  const { activate, toggle, operation, depth, provenance } = control?.dataset ?? {}
+  const { activate, toggle, operation, depth, provenance, reveal } = control?.dataset ?? {}
   if (activate !== undefined) return { kind: 'activate', id: activate }
   if (toggle !== undefined && isOperation(operation)) return { kind: 'toggle', id: toggle, operation }
   if (depth !== undefined) return { kind: 'depth', depth: Number(depth) }
   if (provenance !== undefined) return { kind: 'provenance' }
+  if (reveal !== undefined) return { kind: 'reveal' }
   return undefined
 }
 
@@ -109,6 +111,8 @@ function findFocusTarget(container: HTMLElement, focus: FocusTarget): HTMLElemen
       return byId(elementId.depth(focus.depth))
     case 'provenance':
       return byId(elementId.provenance)
+    case 'reveal':
+      return byId(elementId.reveal)
   }
 }
 
@@ -116,6 +120,43 @@ export function showErrors(container: HTMLElement, errors: readonly string[]): v
   const list = document.createElement('ul')
   list.append(...errors.map((error) => element('li', error)))
   container.replaceChildren(element('h1', 'This document has errors'), list)
+}
+
+/**
+ * Says a test document holds deliberately false statements, with nothing to
+ * close it, and a control that shows which, what is wrong with each and what
+ * the generator wrote there; none for any other document.
+ */
+function banner(notice: Notice | undefined): HTMLElement[] {
+  if (notice === undefined) return []
+  const { planted, revealed } = notice
+  const message = document.createElement('p')
+  message.append(
+    element('strong', 'Test document.'),
+    ` ${planted} ${planted === 1 ? 'statement in it is' : 'statements in it are'} deliberately false. Don’t rely on it until you’ve seen which.`,
+  )
+  const reveal = element('span', revealed ? 'Hide which' : 'Show which')
+  reveal.id = elementId.reveal
+  reveal.dataset.reveal = ''
+  makeControl(reveal)
+  reveal.setAttribute('aria-expanded', String(revealed))
+  const note = document.createElement('div')
+  note.className = 'test-notice'
+  note.setAttribute('role', 'note')
+  note.append(message, reveal)
+  if (!notice.revealed) return [note]
+  reveal.setAttribute('aria-controls', elementId.planted)
+  const list = document.createElement('ol')
+  list.id = elementId.planted
+  list.append(
+    ...notice.statements.map(({ text, original, error }) => {
+      const item = document.createElement('li')
+      item.append(element('span', `“${text}”`, 'planted-text'), element('span', error), element('span', `The generator wrote “${original}”`))
+      return item
+    }),
+  )
+  note.append(list)
+  return [note]
 }
 
 /** A button for each depth, from the short forms down to the deepest Elaborate; none if nothing elaborates. */
@@ -333,6 +374,8 @@ export const elementId = {
   revealed: (id: string, operation: Operation): string => `elastic-${operation}-${id}`,
   depth: (depth: number): string => `elastic-depth-${depth}`,
   provenance: 'elastic-provenance',
+  reveal: 'elastic-reveal',
+  planted: 'elastic-planted',
 }
 
 function makeControl(control: HTMLElement): void {

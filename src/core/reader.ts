@@ -12,13 +12,15 @@ import { view, type ViewBlock } from './view'
 
 /**
  * What the reader asked for: to activate a phrase, to toggle one of its
- * operations, to open the document to a depth, or to show or hide provenance.
+ * operations, to open the document to a depth, to show or hide provenance, or
+ * to show or hide which statements of a test document are false.
  */
 export type Intent =
   | { readonly kind: 'activate'; readonly id: string }
   | { readonly kind: 'toggle'; readonly id: string; readonly operation: Operation }
   | { readonly kind: 'depth'; readonly depth: number }
   | { readonly kind: 'provenance' }
+  | { readonly kind: 'reveal' }
 
 type PhraseIntent = Extract<Intent, { readonly kind: 'activate' | 'toggle' }>
 
@@ -27,6 +29,7 @@ export type FocusTarget =
   | { readonly kind: 'chip' | 'attachment'; readonly id: string; readonly operation: Operation }
   | { readonly kind: 'depth'; readonly depth: number }
   | { readonly kind: 'provenance' }
+  | { readonly kind: 'reveal' }
 
 /**
  * Where focus goes after an intent, and whether a click should leave the page
@@ -53,10 +56,25 @@ export interface Marking {
   readonly needed: boolean
 }
 
+/** A planted statement as the reader sees it, what is wrong with it, and what the generator wrote there. */
+export interface PlantedStatement {
+  readonly level: string
+  readonly text: string
+  readonly original: string
+  readonly error: string
+}
+
+/** What a test document's banner says: how many of its statements are deliberately false, and, once revealed, which. */
+export type Notice =
+  | { readonly planted: number; readonly revealed: false }
+  | { readonly planted: number; readonly revealed: true; readonly statements: readonly PlantedStatement[] }
+
 export interface Reader {
   readonly view: () => ViewBlock[]
   readonly depth: () => Depth
   readonly marking: () => Marking
+  /** The banner of a test document, which the reader cannot dismiss; none for any other document. */
+  readonly notice: () => Notice | undefined
   readonly dispatch: (intent: Intent) => Effect | undefined
 }
 
@@ -72,6 +90,10 @@ export function createReader(document: ElasticDocument): Reader {
     if (intent.kind === 'provenance') {
       return { state: { ...state, showProvenance: !state.showProvenance }, effect: { focus: { kind: 'provenance' }, keepStill: true } }
     }
+    if (intent.kind === 'reveal') {
+      if (document.planted === undefined) return undefined
+      return { state: { ...state, revealed: !state.revealed }, effect: { focus: { kind: 'reveal' }, keepStill: true } }
+    }
     const indexed = stretches.get(intent.id)
     return indexed && apply(indexed.stretch, state, intent)
   }
@@ -80,6 +102,7 @@ export function createReader(document: ElasticDocument): Reader {
     view: () => view(document, state),
     depth: () => ({ current: matchingDepth(stretches, state), deepest }),
     marking: () => ({ shown: state.showProvenance, needed }),
+    notice: () => notice(document, stretches, state),
     dispatch: (intent) => {
       const next = transition(intent)
       if (next) state = next.state
@@ -91,6 +114,14 @@ export function createReader(document: ElasticDocument): Reader {
 interface Transition {
   readonly state: ReaderState
   readonly effect: Effect
+}
+
+function notice(document: ElasticDocument, stretches: ReadonlyMap<string, IndexedStretch>, state: ReaderState): Notice | undefined {
+  const { planted } = document
+  if (planted === undefined) return undefined
+  if (!state.revealed) return { planted: planted.length, revealed: false }
+  const statements = planted.map(({ level, original, error }) => ({ level, text: stretches.get(level)?.stretch.short.text ?? '', original, error }))
+  return { planted: planted.length, revealed: true, statements }
 }
 
 /**

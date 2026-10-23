@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Operation } from '../core/document'
-import { documentFrom } from '../core/testing'
+import { documentFrom, testDocument } from '../core/testing'
 import { elementId, mount, showErrors } from './render'
 
 const nested = documentFrom({
@@ -789,5 +789,72 @@ describe('showErrors', () => {
       'title: expected a string',
       'blocks: expected an array',
     ])
+  })
+})
+
+describe('a test document', () => {
+  function mounted(count: number): HTMLElement {
+    const container = document.createElement('div')
+    document.body.replaceChildren(container)
+    mount(container, testDocument(count))
+    return container
+  }
+
+  /** The banner's message, without its control or what that reveals. */
+  const message = (container: HTMLElement) => container.firstElementChild?.querySelector('p')?.textContent
+
+  it('opens with a banner above the title, saying how many statements are deliberately false, which nothing closes', () => {
+    const container = mounted(2)
+    const banner = container.firstElementChild
+
+    expect(banner?.getAttribute('role')).toBe('note')
+    expect(message(container)).toBe('Test document. 2 statements in it are deliberately false. Don’t rely on it until you’ve seen which.')
+    expect(banner?.nextElementSibling?.tagName).toBe('H1')
+    expect([...(banner?.querySelectorAll('[role="button"]') ?? [])].map((button) => button.textContent)).toEqual(['Show which'])
+
+    click(control(container, 'p1'), 1)
+
+    expect(message(container)).toBe('Test document. 2 statements in it are deliberately false. Don’t rely on it until you’ve seen which.')
+  })
+
+  it('says how many in the singular', () => {
+    expect(message(mounted(1))).toMatch(/^Test document\. 1 statement in it is deliberately false\./)
+  })
+
+  it('shows which statements are false, what is wrong and what the generator wrote, keeping focus on its control and the page still', () => {
+    const container = mounted(2)
+    const reveal = () => byId(container, elementId.reveal) ?? document.body
+    const statements = () =>
+      [...(byId(container, elementId.planted)?.querySelectorAll('li') ?? [])].map((item) => [...item.children].map((part) => part.textContent))
+    const focus = vi.spyOn(HTMLElement.prototype, 'focus')
+    try {
+      expect([reveal().getAttribute('role'), reveal().getAttribute('aria-expanded')]).toEqual(['button', 'false'])
+
+      reveal().click()
+
+      expect([reveal().textContent, reveal().getAttribute('aria-expanded'), reveal().getAttribute('aria-controls')]).toEqual([
+        'Hide which',
+        'true',
+        elementId.planted,
+      ])
+      expect(statements()).toEqual([
+        ['“More instruction helps”', 'Contradicts the passage.', 'The generator wrote “More instruction hurts”'],
+        ['“As 2025 benchmarks showed”', 'The passage names no benchmarks.', 'The generator wrote “Capability is uneven”'],
+      ])
+      expect(document.activeElement).toBe(reveal())
+      expect(focus.mock.lastCall?.[0]).toEqual({ preventScroll: true })
+
+      expect(press(reveal(), 'Enter').defaultPrevented).toBe(true)
+      expect([reveal().textContent, statements()]).toEqual(['Show which', []])
+    } finally {
+      focus.mockRestore()
+    }
+  })
+
+  it('shows no banner for any other document', () => {
+    const container = document.createElement('div')
+    mount(container, nested)
+
+    expect(container.firstElementChild?.tagName).toBe('H1')
   })
 })

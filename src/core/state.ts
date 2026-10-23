@@ -1,16 +1,18 @@
 import type { Operation } from './document'
 
 /**
- * What the reader has opened, which phrases show their operation buttons, and
- * whether the page marks provenance.
+ * What the reader has opened, which phrases show their operation buttons,
+ * whether the page marks provenance, and whether a test document's banner
+ * shows which statements are false.
  */
 export interface ReaderState {
   readonly open: ReadonlyMap<string, ReadonlySet<Operation>>
   readonly menus: ReadonlySet<string>
   readonly showProvenance: boolean
+  readonly revealed: boolean
 }
 
-export const emptyState: ReaderState = { open: new Map(), menus: new Set(), showProvenance: true }
+export const emptyState: ReaderState = { open: new Map(), menus: new Set(), showProvenance: true, revealed: false }
 
 const none: ReadonlySet<Operation> = new Set()
 

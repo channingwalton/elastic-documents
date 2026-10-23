@@ -144,6 +144,32 @@ describe('npm run check', () => {
     expect(await readFile(output, 'utf8')).toContain('judged by claude-sonnet-5-5')
   })
 
+  it('says how many of a test document’s planted errors it flagged, names those it missed, and keeps the banner in the review copy', async () => {
+    const planted = [{ level: 'p1', original: 'Capability, not model names', error: 'Rewords the headline.' }]
+    await writeFile(join(dir, `${name}.json`), JSON.stringify({ ...document, planted }))
+
+    expect(await checkWith({ FAKE_VERDICT: 'overstated' }, `${name}.json`)).toMatchObject({
+      code: 0,
+      stdout: expect.stringContaining('\nflagged 1 of 1 planted error\nwrote '),
+    })
+    expect(JSON.parse(await readFile(output, 'utf8')).planted).toEqual(planted)
+    expect(await checkWith({}, `${name}.json`)).toMatchObject({ code: 0, stdout: expect.stringContaining('\nflagged 0 of 1 planted error, missing p1\nwrote ') })
+  })
+
+  it('says which planted errors are on levels it does not check, rather than count them as missed', async () => {
+    const grounded = { id: 'g1', short: { provenance: 'compression', text: 'A claim with only its sources' }, ground: [{ note: 'Execution Classes', quote: passage }] }
+    const planted = [
+      { level: 'p1', original: 'Capability, not model names', error: 'Rewords the headline.' },
+      { level: 'g1', original: 'A claim', error: 'Has no long form to check against.' },
+    ]
+    await writeFile(join(dir, `${name}.json`), JSON.stringify({ ...document, blocks: [...document.blocks, { provenance: 'compression', inlines: [grounded] }], planted }))
+
+    expect(await checkWith({ FAKE_VERDICT: 'overstated' }, `${name}.json`)).toMatchObject({
+      code: 0,
+      stdout: expect.stringContaining('\nflagged 1 of 1 planted error; not checked: g1\nwrote '),
+    })
+  })
+
   it('reports evidence that is not in the passage, and writes nothing', async () => {
     expect(await checkWith({ FAKE_CLAUDE: 'misquote' }, `${name}.json`)).toEqual({
       code: 1,

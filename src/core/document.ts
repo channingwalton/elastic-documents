@@ -81,9 +81,21 @@ export interface Block {
   readonly inlines: readonly Inline[]
 }
 
+/**
+ * A level whose short form was replaced with a deliberate error, to test
+ * readers or a checker: what the generator wrote there, and what is wrong.
+ */
+export interface PlantedError {
+  readonly level: string
+  readonly original: string
+  readonly error: string
+}
+
+/** A document, and the errors planted in it, if it is a test document. */
 export interface ElasticDocument {
   readonly title: string
   readonly blocks: readonly Block[]
+  readonly planted?: readonly PlantedError[]
 }
 
 export type ParseResult =
@@ -115,18 +127,59 @@ const isVisible = (inline: Inline): boolean => inline.kind === 'stretch' || inli
  * unmarked one takes the provenance of the level around it, which is approved
  * at the top. Exemplify, Challenge and Reframe content is an addition, and so
  * is every level inside an addition.
+ *
+ * A test document lists in `planted` each level whose short form holds a
+ * deliberate error, as `{ level, original, error }`. A planted level must be
+ * AI text. Any other field at the top is an error, so a misspelt record
+ * cannot leave a test document looking like any other.
  */
 export function parseDocument(json: unknown): ParseResult {
   if (!isObject(json)) return { ok: false, errors: ['document: expected an object'] }
 
   const context: Context = { errors: [], ids: new Set() }
+  for (const key of Object.keys(json)) if (!documentFields.has(key)) context.errors.push(`${key}: unknown field`)
   const { title } = json
   if (!hasText(title)) context.errors.push('title: expected a non-empty string')
   const blocks = parseBlocks(json.blocks, context)
+  const planted = json.planted === undefined ? undefined : parsePlanted(json.planted, blocks, context)
 
   return !hasText(title) || context.errors.length > 0
     ? { ok: false, errors: context.errors }
-    : { ok: true, document: { title, blocks } }
+    : { ok: true, document: { title, blocks, ...(planted === undefined ? {} : { planted }) } }
+}
+
+const documentFields: ReadonlySet<string> = new Set(['title', 'blocks', 'planted'])
+
+const plantedFields: ReadonlySet<string> = new Set(['level', 'original', 'error'])
+
+/** Reads the planted errors, each on a level of AI text that the blocks hold and that no longer says what the generator wrote, and each level planted once. */
+function parsePlanted(value: unknown, blocks: readonly Block[], context: Context): PlantedError[] {
+  const stretches = indexStretches({ title: '', blocks })
+  const seen = new Set<string>()
+  return parseItems(value, 'planted', context, (item, path) => {
+    if (!isObject(item)) {
+      context.errors.push(`${path}: expected an object`)
+      return []
+    }
+    rejectUnknownFields(item, plantedFields, path, context)
+    const { level, original, error } = item
+    const found = hasText(level) ? stretches.get(level) : undefined
+    if (!hasText(level)) context.errors.push(`${path}.level: expected a non-empty string`)
+    else if (seen.has(level)) context.errors.push(`${path}.level: "${level}" is planted more than once`)
+    else {
+      seen.add(level)
+      if (found === undefined) context.errors.push(`${path}.level: no stretch has the id "${level}"`)
+      else if (found.stretch.short.provenance === 'approved') {
+        context.errors.push(`${path}.level: expected AI text, since an error planted in the author’s text would show as theirs`)
+      }
+    }
+    if (!hasText(original)) context.errors.push(`${path}.original: expected a non-empty string`)
+    else if (found?.stretch.short.text.trim() === original.trim()) {
+      context.errors.push(`${path}.original: the level still says this, so no error was planted in it`)
+    }
+    if (!hasText(error)) context.errors.push(`${path}.error: expected a non-empty string`)
+    return [{ level: hasText(level) ? level : '', original: hasText(original) ? original : '', error: hasText(error) ? error : '' }]
+  })
 }
 
 function parseBlocks(value: unknown, context: Context): Block[] {
@@ -322,4 +375,66 @@ export function indexStretches(document: ElasticDocument): ReadonlyMap<string, I
   }
   for (const block of document.blocks) visit(block.inlines, 1)
   return found
+}
+
+/**
+ * The document with `change` applied to every stretch, wherever it is nested,
+ * each after the stretches inside it.
+ */
+export function mapStretches(document: ElasticDocument, change: (stretch: Stretch) => Stretch): ElasticDocument {
+  const block = (level: Block): Block => ({ ...level, inlines: level.inlines.map(inline) })
+  const inline = (item: Inline): Inline => (item.kind === 'text' ? item : change(within(item)))
+  const within = (stretch: Stretch): Stretch => {
+    const { elaborate, derive, exemplify, challenge, reframe } = stretch
+    return {
+      ...stretch,
+      ...(elaborate === undefined ? {} : { elaborate: block(elaborate) }),
+      ...(derive === undefined ? {} : { derive: derive.map(block) }),
+      ...(exemplify === undefined ? {} : { exemplify: exemplify.map(block) }),
+      ...(challenge === undefined ? {} : { challenge: challenge.map(block) }),
+      ...(reframe === undefined ? {} : { reframe: reframe.map(block) }),
+    }
+  }
+  return { ...document, blocks: document.blocks.map(block) }
+}
+
+/** A paragraph or level in the JSON form, always marked, so it reads back as it was. */
+export interface BlockJson {
+  readonly provenance: Provenance
+  readonly inlines: readonly (string | StretchJson)[]
+}
+
+export interface StretchJson {
+  readonly id: string
+  readonly short: ShortForm
+  readonly elaborate?: BlockJson
+  readonly ground?: readonly Passage[]
+  readonly derive?: readonly BlockJson[]
+  readonly exemplify?: readonly BlockJson[]
+  readonly challenge?: readonly BlockJson[]
+  readonly reframe?: readonly BlockJson[]
+}
+
+export interface DocumentJson {
+  readonly title: string
+  readonly blocks: readonly BlockJson[]
+  readonly planted?: readonly PlantedError[]
+}
+
+/** The document in the JSON form `parseDocument` reads, with every level marked, so it reads back exactly as it is. */
+export function toJson(document: ElasticDocument): DocumentJson {
+  const block = ({ provenance, inlines }: Block): BlockJson => ({ provenance, inlines: inlines.map(inline) })
+  const inline = (item: Inline): string | StretchJson => (item.kind === 'text' ? item.text : stretch(item))
+  const stretch = ({ id, short, elaborate, ground, derive, exemplify, challenge, reframe }: Stretch): StretchJson => ({
+    id,
+    short: { provenance: short.provenance, text: short.text },
+    ...(elaborate === undefined ? {} : { elaborate: block(elaborate) }),
+    ...(ground === undefined ? {} : { ground }),
+    ...(derive === undefined ? {} : { derive: derive.map(block) }),
+    ...(exemplify === undefined ? {} : { exemplify: exemplify.map(block) }),
+    ...(challenge === undefined ? {} : { challenge: challenge.map(block) }),
+    ...(reframe === undefined ? {} : { reframe: reframe.map(block) }),
+  })
+  const { title, blocks, planted } = document
+  return { title, blocks: blocks.map(block), ...(planted === undefined ? {} : { planted }) }
 }

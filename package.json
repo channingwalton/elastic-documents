@@ -12,6 +12,7 @@
     "export": "node scripts/export.ts",
     "generate": "node scripts/generate.ts",
     "check": "node scripts/check.ts",
+    "plant": "node scripts/plant.ts",
     "test": "vitest run"
   },
   "devDependencies": {

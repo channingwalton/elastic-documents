@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createReader } from './reader'
-import { documentFrom } from './testing'
+import { documentFrom, testDocument } from './testing'
 
 const stretchtext = { note: 'Stretchtext', date: '2026-10-19', quote: 'the reader remains oriented' }
 const elastic = { note: 'Elastic Documents', quote: 'A summary opens into its detail.' }
@@ -485,5 +485,48 @@ describe('provenance', () => {
     expect(createReader(withShort({ provenance: 'compression', text: 'a' })).marking().needed).toBe(true)
     expect(createReader(marked).marking().needed).toBe(true)
     expect(createReader(rich).marking().needed).toBe(true)
+  })
+})
+
+describe('notice', () => {
+  it('reports how many errors a test document has planted, and nothing for any other document', () => {
+    expect(createReader(testDocument(2)).notice()).toEqual({ planted: 2, revealed: false })
+    expect(createReader(rich).notice()).toBeUndefined()
+  })
+
+  it('reveals which statements were planted, what is wrong with each and what the generator wrote, and hides them again', () => {
+    const reader = createReader(testDocument(2))
+
+    expect(reader.dispatch({ kind: 'reveal' })).toEqual({ focus: { kind: 'reveal' }, keepStill: true })
+    expect(reader.notice()).toEqual({
+      planted: 2,
+      revealed: true,
+      statements: [
+        { level: 'p1', text: 'More instruction helps', original: 'More instruction hurts', error: 'Contradicts the passage.' },
+        { level: 'p2', text: 'As 2025 benchmarks showed', original: 'Capability is uneven', error: 'The passage names no benchmarks.' },
+      ],
+    })
+
+    reader.dispatch({ kind: 'reveal' })
+
+    expect(reader.notice()).toEqual({ planted: 2, revealed: false })
+  })
+
+  it('keeps the planted statements revealed while the reader opens phrases, chooses a depth or switches provenance', () => {
+    const reader = createReader(testDocument(2))
+    reader.dispatch({ kind: 'reveal' })
+
+    reader.dispatch({ kind: 'activate', id: 'p1' })
+    reader.dispatch({ kind: 'depth', depth: 0 })
+    reader.dispatch({ kind: 'provenance' })
+
+    expect(reader.notice()?.revealed).toBe(true)
+  })
+
+  it('reveals nothing in a document with nothing planted', () => {
+    const reader = createReader(rich)
+
+    expect(reader.dispatch({ kind: 'reveal' })).toBeUndefined()
+    expect(reader.notice()).toBeUndefined()
   })
 })

@@ -1,4 +1,4 @@
-import { indexStretches, type Block, type ElasticDocument } from '../core/document.ts'
+import { indexStretches, type Block, type ElasticDocument, type PlantedError } from '../core/document.ts'
 
 /** How a claim in a shorter level stands against the passage it compresses. */
 export const verdicts = ['supported', 'overstated', 'unsupported', 'contradicted'] as const
@@ -189,4 +189,27 @@ function flagsOf({ id, text, passage, claims }: LevelCheck): Flag[] {
   return claims.flatMap(({ claim, verdict, evidence }) =>
     verdict === 'supported' ? [] : [{ level: id, text, passage, claim, verdict, evidence }],
   )
+}
+
+/**
+ * Which of a test document's planted errors the check flagged, missed, or
+ * never asked about, by level. A planted error counts as flagged when any claim
+ * of its level is, whichever claim that is. One on a level the check skips,
+ * such as an AI addition, is not checked rather than missed.
+ */
+export function scorePlanted(
+  planted: readonly PlantedError[],
+  { levels, flags }: { readonly levels: readonly LevelCheck[]; readonly flags: readonly Flag[] },
+): { readonly flagged: readonly string[]; readonly missed: readonly string[]; readonly unchecked: readonly string[] } {
+  const checked = new Set(levels.map(({ id }) => id))
+  const caught = new Set(flags.map(({ level }) => level))
+  const flagged: string[] = []
+  const missed: string[] = []
+  const unchecked: string[] = []
+  for (const { level } of planted) {
+    if (caught.has(level)) flagged.push(level)
+    else if (checked.has(level)) missed.push(level)
+    else unchecked.push(level)
+  }
+  return { flagged, missed, unchecked }
 }

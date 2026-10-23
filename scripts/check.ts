@@ -3,7 +3,7 @@ import { basename, dirname, extname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
 import { parseDocument } from '../src/core/document.ts'
-import { checkDocument, verdicts, type Checked } from '../src/generate/check.ts'
+import { checkDocument, scorePlanted, verdicts, type Checked } from '../src/generate/check.ts'
 import { claudeChecker } from '../src/generate/claude.ts'
 import { reviewCopy } from '../src/generate/review.ts'
 
@@ -20,7 +20,8 @@ const usage = 'usage: npm run check -- <document.json> [--model <model>]'
  * they compress, with a model judging each claim. Writes a review copy, with
  * every claim not judged supported shown under Challenge, to this project's
  * generated/ folder under the document's name, wherever it is run from, so it
- * never writes into the vault. Returns the exit code.
+ * never writes into the vault. For a test document, also says how many of its
+ * planted errors it flagged, and which it missed. Returns the exit code.
  */
 async function main(argv: readonly string[]): Promise<number> {
   let args: { readonly positionals: readonly string[]; readonly values: { readonly model: string } }
@@ -64,6 +65,14 @@ async function main(argv: readonly string[]): Promise<number> {
   const claims = checked.levels.flatMap((level) => level.claims)
   const counts = verdicts.map((verdict) => `${claims.filter((claim) => claim.verdict === verdict).length} ${verdict}`)
   console.log(`checked ${checked.levels.length} levels, ${claims.length} claims: ${counts.join(', ')}`)
+  const { planted } = parsed.document
+  if (planted !== undefined) {
+    const { flagged, missed, unchecked } = scorePlanted(planted, checked)
+    const asked = flagged.length + missed.length
+    const missing = missed.length === 0 ? '' : `, missing ${missed.join(', ')}`
+    const skipped = unchecked.length === 0 ? '' : `; not checked: ${unchecked.join(', ')}`
+    console.log(`flagged ${flagged.length} of ${asked} planted ${asked === 1 ? 'error' : 'errors'}${missing}${skipped}`)
+  }
   console.log(`wrote ${target}`)
   return 0
 }

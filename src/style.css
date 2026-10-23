@@ -9,6 +9,8 @@
   --attachment: #f3f1ea;
   --compression: #1f5f58;
   --addition: #7a2f6c;
+  --warning: #9b1c1c;
+  --warning-background: #fbeceb;
   color-scheme: light;
 }
 
@@ -24,6 +26,8 @@
     --attachment: #25272b;
     --compression: #7ccfc2;
     --addition: #e3a5d6;
+    --warning: #f4a3a0;
+    --warning-background: #3a2222;
     color-scheme: dark;
   }
 }
@@ -39,6 +43,56 @@ main {
   max-width: 40rem;
   margin: 0 auto;
   padding: 2rem 1rem 4rem;
+}
+
+.test-notice {
+  margin: 0 0 1.2rem;
+  padding: 0.7rem 0.9rem;
+  border: 2px solid var(--warning);
+  border-radius: 6px;
+  background: var(--warning-background);
+  color: var(--text);
+  font: 0.95rem/1.5 system-ui, sans-serif;
+}
+
+.test-notice p {
+  margin: 0 0 0.5rem;
+}
+
+.test-notice strong {
+  color: var(--warning);
+}
+
+[data-reveal] {
+  display: inline-block;
+  padding: 0.2em 0.65em;
+  border: 1px solid var(--warning);
+  border-radius: 1em;
+  color: var(--warning);
+  cursor: pointer;
+  font-size: 0.85em;
+}
+
+[data-reveal][aria-expanded='true'] {
+  background: var(--warning);
+  color: var(--warning-background);
+}
+
+.test-notice ol {
+  margin: 0.7rem 0 0;
+  padding-left: 1.4rem;
+}
+
+.test-notice li + li {
+  margin-top: 0.5rem;
+}
+
+.test-notice li > span {
+  display: block;
+}
+
+.planted-text {
+  font-weight: 600;
 }
 
 h1 {
@@ -295,6 +349,7 @@ h1 {
 .stretch:focus-visible,
 .depth [data-depth]:focus-visible,
 [data-provenance]:focus-visible,
+[data-reveal]:focus-visible,
 .collapse:focus-visible,
 .chip:focus-visible,
 .close:focus-visible,
